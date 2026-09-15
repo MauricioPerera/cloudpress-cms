@@ -19,7 +19,16 @@ wrangler d1 execute <database> --remote --file migrations/0015_plugin_webhooks.s
 wrangler pages deploy . --project-name <pages-project> --branch main
 ```
 
-Con una cuenta temporal administradora, instala `cloudpress-commerce` desde **Plugins**. Debe aparecer el menú **Comercio** en `wp-admin`; su pantalla genera pestañas para Productos, Pedidos, Acciones, Taxonomías, Diagnóstico y Privacidad desde el manifiesto activo.
+Con una cuenta temporal administradora, instala `cloudpress-commerce` desde **Plugins**. Debe aparecer el menú **Comercio** en `wp-admin`. Sus tipos declarados (**Productos** y **Pedidos**) abren `admin.html?contentType=<tipo>`: el listado, editor, metadatos, taxonomías, revisiones y papelera se sirven desde la UI base, no desde un panel paralelo. Las acciones, webhooks, diagnóstico y privacidad permanecen como secciones administrativas del plugin.
+
+La prueba de producción no deja datos persistentes: crea un producto y un término QA, los purga, desactiva y reactiva Commerce. Requiere una cuenta administradora temporal:
+
+```powershell
+$env:CLOUDPRESS_URL = 'https://<pages-project>.pages.dev'
+$env:CLOUDPRESS_VERIFY_USERNAME = '<admin-temporal>'
+$env:CLOUDPRESS_VERIFY_PASSWORD = '<clave-temporal>'
+node scripts/verify-production-plugin-content.mjs
+```
 
 Las verificaciones HTTP mínimas son:
 
@@ -45,7 +54,7 @@ No se debe usar contenido real para estas pruebas. Borra la cuenta y los datos Q
 | 5. Permisos/rutas | Llamar catálogo sin cookie y con usuario `buy-products` | `403` sin permiso y `200` con la capacidad. |
 | 6. Migración/reversión | Instalar, consultar `plugin_migrations`, desinstalar y volver a consultar | La migración namespaced se registra una vez y se elimina con la instalación; no se ejecuta DDL de plugin arbitrario. |
 | 7. Tarea idempotente | Ajustar inventario dos veces con el mismo estado y ejecutar `jobs/run` | Sólo existe una fila por `task_id,dedupe_key`; estado `completed` y resultado observable. |
-| 8. UI administrativa | `npm run test:plugin-admin-ui` y abrir `plugin-admin.html?plugin=cloudpress-commerce` | Panel, listado, editor, taxonomías, papelera, acciones, diagnóstico, privacidad y webhooks. |
+| 8. UI administrativa base | `npm run test:plugin-admin-ui`; abrir `wp-admin`, pulsar **Productos** y comprobar `/admin?contentType=product`; ejecutar `node scripts/verify-production-plugin-content.mjs` | El tipo declarado usa el listado/editor base, con metadatos, taxonomías, revisiones, papelera, restauración y purga. Acciones, diagnóstico, privacidad y webhooks siguen expuestos por el plugin. |
 | 9. Privacidad | `GET` y `DELETE /privacy/<userId>` | Exportación contiene registros/metadatos declarados; la segunda lectura está vacía. |
-| 10. Ciclo de vida | `PATCH status=disabled`, `DELETE /api/admin/plugins/cloudpress-commerce` | Rutas y esquema devuelven `404`/no contienen UI; datos se preservan o purgan según `uninstallPolicy`. |
+| 10. Ciclo de vida | `PATCH status=disabled`, esperar hasta 3 s en `wp-admin`, `DELETE /api/admin/plugins/cloudpress-commerce` | Las opciones de menú desaparecen sin recarga; el esquema deja de contener el tipo y su ruta devuelve `422`. Los datos se preservan o purgan según `uninstallPolicy`. |
 | 11. Commerce de referencia | `npm run test:plugin-host` y pasos HTTP 3–5 | Productos, clientes, inventario, carrito y pedidos de prueba funcionan sin pagos reales. |
