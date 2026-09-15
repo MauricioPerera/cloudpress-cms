@@ -49,6 +49,7 @@ export async function onRequestDelete({ request, env, params }) {
   if (!admin) return json({ error: "Se requiere rol admin" }, 403);
   const id = Number(params.id);
   if (!Number.isInteger(id) || id < 1 || id === admin.id) return json({ error: "No puedes eliminar esta cuenta" }, 400);
+  await env.DB.prepare("UPDATE plugin_installations SET installed_by=? WHERE installed_by=?").bind(admin.id, id).run();
   const result = await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
   return result.meta.changes ? json({ ok: true }) : json({ error: "Usuario no encontrado" }, 404);
 }
