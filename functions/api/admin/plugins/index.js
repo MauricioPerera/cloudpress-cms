@@ -2,14 +2,16 @@ import { json, requireAdmin } from "../../../_shared.js";
 import { validatePluginManifest } from "../../../_plugins/contract.js";
 import { pluginRegistry } from "../../../_plugins/registry.js";
 import { applyPluginMigrations, pluginAudit } from "../../../_plugins/host.js";
+import { localizedManifest, requestedLocale } from "../../../_plugins/i18n.js";
 
-function available() { return [...pluginRegistry.values()].map(({ manifest }) => manifest); }
+function available(locale) { return [...pluginRegistry.values()].map(({ manifest }) => localizedManifest(manifest, locale)); }
 async function audit(db, id, action, actor, details = {}) { await db.prepare("INSERT INTO plugin_audit_log(plugin_id,action,actor_id,details_json) VALUES(?,?,?,?)").bind(id, action, actor, JSON.stringify(details)).run(); }
 
 export async function onRequestGet({ request, env }) {
   if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
   const installed = await env.DB.prepare("SELECT plugin_id,status,installed_at,updated_at FROM plugin_installations ORDER BY plugin_id").all();
-  return json({ contractVersion: "cloudpress-plugin/v1", available: available(), installed: installed.results }, 200, { "Cache-Control": "no-store" });
+  const locale = requestedLocale(new URL(request.url).searchParams.get("locale"));
+  return json({ contractVersion: "cloudpress-plugin/v2", locale, available: available(locale), installed: installed.results }, 200, { "Cache-Control": "no-store" });
 }
 
 export async function onRequestPost({ request, env }) {

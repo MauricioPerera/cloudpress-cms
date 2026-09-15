@@ -21,6 +21,7 @@ export async function onRequestGet({ request, env }) {
     ...item,
     updated_at: String(item.updated_at || "").replace(/Z$/, ""),
     terms: (await env.DB.prepare("SELECT taxonomy_terms.id, taxonomy_terms.type, taxonomy_terms.name, taxonomy_terms.slug FROM content_terms JOIN taxonomy_terms ON taxonomy_terms.id = content_terms.term_id WHERE content_id = ? ORDER BY taxonomy_terms.type, taxonomy_terms.name").bind(item.id).all()).results,
+    pluginTerms: (await env.DB.prepare("SELECT plugin_terms.id,plugin_terms.plugin_id,plugin_terms.taxonomy_id,plugin_terms.name,plugin_terms.slug FROM plugin_content_terms JOIN plugin_terms ON plugin_terms.id=plugin_content_terms.term_id JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_installations.status='enabled' AND plugin_content_terms.content_id=? ORDER BY plugin_terms.taxonomy_id,plugin_terms.name").bind(item.id).all()).results,
   })));
   return json({ items }, 200, { "Cache-Control": "no-store" });
 }

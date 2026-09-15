@@ -9,6 +9,29 @@ export const generatedPluginRegistry = new Map([
   "name": "CloudPress Commerce",
   "version": "0.1.0",
   "description": "Comercio de referencia para productos, clientes, inventario, carritos y pedidos de prueba.",
+  "i18n": {
+    "defaultLocale": "es",
+    "messages": {
+      "en": {
+        "name": "CloudPress Commerce",
+        "description": "Reference commerce for products, customers, inventory, carts, and test orders.",
+        "contentTypes.product": "Products",
+        "contentTypes.order": "Orders",
+        "taxonomies.product-category": "Product categories",
+        "taxonomies.product-tag": "Product tags",
+        "actions.create-product": "Create product",
+        "actions.create-customer": "Create customer",
+        "actions.adjust-inventory": "Adjust inventory",
+        "actions.add-cart-item": "Add to cart",
+        "actions.create-order": "Create test order",
+        "menus.commerce": "Commerce",
+        "capabilities.manage-commerce": "Manage commerce",
+        "capabilities.manage-inventory": "Manage inventory",
+        "capabilities.buy-products": "Buy products",
+        "webhooks.commerce-event": "Commerce event"
+      }
+    }
+  },
   "uninstallPolicy": "preserve-content-purge-plugin-storage",
   "hooks": [
     "content.beforeCreate"
@@ -28,7 +51,8 @@ export const generatedPluginRegistry = new Map([
     "jobs:enqueue",
     "privacy:manage",
     "diagnostics:read",
-    "capabilities:define"
+    "capabilities:define",
+    "webhooks:register"
   ],
   "capabilities": [
     {
@@ -178,6 +202,30 @@ export const generatedPluginRegistry = new Map([
       }
     },
     {
+      "id": "create-customer",
+      "label": "Crear cliente",
+      "scope": "user",
+      "handler": "create-customer",
+      "capability": "manage-commerce",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 180
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254
+          }
+        }
+      }
+    },
+    {
       "id": "adjust-inventory",
       "label": "Ajustar inventario",
       "scope": "content",
@@ -253,6 +301,14 @@ export const generatedPluginRegistry = new Map([
       "capability": "buy-products"
     }
   ],
+  "webhooks": [
+    {
+      "id": "commerce-event",
+      "label": "Evento de Commerce",
+      "path": "/webhooks/commerce-event",
+      "handler": "commerce-event"
+    }
+  ],
   "tasks": [
     {
       "id": "inventory-reconciled",
@@ -273,6 +329,7 @@ export const generatedPluginRegistry = new Map([
       "id": "commerce-storage-v1",
       "collections": [
         "products",
+        "customers",
         "carts",
         "orders",
         "events"

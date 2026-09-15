@@ -18,6 +18,15 @@ export default {
       await context.audit("commerce_product_created", { sku });
       return value;
     },
+    async "create-customer"(context, input) {
+      const email = String(input.email || "").trim().toLowerCase();
+      const name = String(input.name || "").trim();
+      if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Cliente inválido.");
+      const customerKey = key(email); if (await context.data.get("customers", customerKey)) throw new Error("El cliente ya existe.");
+      const value = { id: crypto.randomUUID(), name, email, createdAt: new Date().toISOString() };
+      await context.data.put("customers", customerKey, value); await context.audit("commerce_customer_created", { customerKey });
+      return value;
+    },
     async "adjust-inventory"(context, input) {
       const sku = key(input.sku), row = await product(context, sku); if (!row) throw new Error("Producto no encontrado.");
       const stock = row.value.stock + input.delta; if (stock < 0) throw new Error("Inventario insuficiente.");
@@ -47,6 +56,15 @@ export default {
   routes: {
     async catalog(context) { return { products: (await context.data.list("products")).map((row) => row.value) }; },
     async cart(context) { return { cart: context.actor.id ? await context.data.get("carts", `user-${context.actor.id}`) : null }; }
+  },
+  webhooks: {
+    async "commerce-event"(context, { body }) {
+      if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.event !== "string" || !body.event.trim()) throw new Error("Evento de Commerce inválido.");
+      const id = crypto.randomUUID(), value = { id, event: body.event.trim(), payload: body.payload ?? null, receivedAt: new Date().toISOString() };
+      await context.data.put("events", `webhook-${id}`, value);
+      await context.audit("commerce_webhook_received", { event: value.event });
+      return { received: true, id, event: value.event };
+    }
   },
   tasks: {
     async "inventory-reconciled"(context, payload) { await context.data.put("events", `inventory-${payload.sku}-${payload.stock}`, { type: "inventory-reconciled", ...payload }); return { reconciled: true, ...payload }; }

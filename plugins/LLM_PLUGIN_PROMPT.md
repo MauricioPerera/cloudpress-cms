@@ -8,8 +8,7 @@ Eres responsable de crear un plugin **compilado** para CloudPress. No inventes r
 
 1. `functions/_plugins/contract.js`: contrato validado por el servidor.
 2. `functions/_plugins/runtime.js`: hooks ejecutables y forma de retorno.
-3. `functions/_plugins/contract.js`: contrato validado por el servidor.
-4. `scripts/generate-plugin-registry.mjs`: descubrimiento compilado de plugins.
+3. `scripts/generate-plugin-registry.mjs`: descubrimiento compilado de plugins.
 4. `plugins/seo-basico/manifest.json` y `plugins/seo-basico/plugin.js`: ejemplo mínimo.
 5. `scripts/validate-plugin.mjs`: validador local de autor.
 
@@ -40,6 +39,7 @@ Usa exactamente esta forma, omitiendo únicamente los bloques opcionales que no 
   "hooks": ["content.beforeCreate"],
   "permissions": ["content:read", "content:transform"],
   "settingsSchema": {},
+  "i18n": { "defaultLocale": "es", "messages": { "en": { "name": "Visible name" } } },
   "contentTypes": [],
   "contentMeta": [],
   "userMeta": [],
@@ -50,6 +50,7 @@ Usa exactamente esta forma, omitiendo únicamente los bloques opcionales que no 
   "taxonomies": [],
   "migrations": [],
   "capabilities": [],
+  "webhooks": [],
   "uninstallPolicy": "preserve-content-purge-plugin-storage"
 }
 ```
@@ -59,13 +60,14 @@ Reglas no negociables:
 - `id`: `^[a-z0-9][a-z0-9-]{2,47}$`; minúsculas, números y guiones; 3–48 caracteres.
 - `version`: SemVer, por ejemplo `1.0.0`.
 - `hooks`: lista única no vacía. Sólo `content.beforeCreate` y `content.afterCreate`.
-- `permissions`: lista única no vacía. El contrato v2 también admite `taxonomies:define`, `admin-ui:register`, `storage:read`, `storage:write`, `routes:register`, `jobs:enqueue`, `privacy:manage`, `diagnostics:read` y `capabilities:define`.
+- `permissions`: lista única no vacía. El contrato v2 también admite `taxonomies:define`, `admin-ui:register`, `storage:read`, `storage:write`, `routes:register`, `jobs:enqueue`, `privacy:manage`, `diagnostics:read`, `capabilities:define` y `webhooks:register`.
+- `i18n` es opcional: `defaultLocale` y cada locale usan `es` o `en-US`; `messages` traduce `name`, `description`, y etiquetas con claves como `contentTypes.product`, `actions.sync`, `menus.mi-menu`, `taxonomies.tema`, `capabilities.manage-x` o `webhooks.incoming`. El host sirve estas etiquetas con `?locale=en`.
 - Si declaras `content.beforeCreate`, declara también `content:transform`.
 - `settingsSchema`, si existe, debe ser un objeto serializado de máximo 4 KB.
 - `contentTypes` requiere `content-types:define`. Cada tipo tiene `id`, `label` (máximo 80) y `supports` con una combinación de `title`, `body`, `excerpt`.
 - `contentMeta` requiere `content-meta:define`; `userMeta` requiere `user-meta:define`. Cada definición tiene `key` con formato `<plugin-id>.<campo>`, `type` (`string`, `number`, `boolean` o `json`) y `required` booleano.
 - `actions` requiere `actions:register`. Cada acción tiene `id`, `label`, `scope`, `handler`, `capability` e `inputSchema`; el handler vive en `export default { actions: { ... } }`.
-- `routes`, `tasks`, `menus`, `taxonomies`, `migrations` y `capabilities` requieren sus permisos homónimos. Las rutas, acciones y menús se autorizan por rol base o capacidad declarada; las tareas se ejecutan mediante la cola namespaced del host.
+- `routes`, `tasks`, `menus`, `taxonomies`, `migrations`, `capabilities` y `webhooks` requieren sus permisos homónimos. Las rutas, acciones y menús se autorizan por rol base o capacidad declarada; las tareas se ejecutan mediante la cola namespaced del host. Cada webhook declara `id`, `label`, `path` y `handler`; su handler vive en `export default { webhooks: { ... } }` y recibe un token rotado por el administrador, nunca un secreto escrito en el manifiesto.
 
 Pide sólo los permisos mínimos. No declares metadatos, tipos o acciones que el plugin no vaya a usar.
 
