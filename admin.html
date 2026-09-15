@@ -50,7 +50,7 @@ async function init(){try{const me=await api('/api/me');if(me.user.role!=='admin
   bindUserEditor=function(root){const u=state.editing.item,f=root.querySelector('#user-form');f.username.value=u.username||'';f.email.value=u.email||'';f.role.value=u.role||'user';f.active.value=String(u.active??true);root.querySelector('#cancel-user').onclick=()=>{state.editing=null;renderUsers()};f.onsubmit=async e=>{e.preventDefault();const p={username:f.username.value,email:f.email.value,role:f.role.value,active:f.active.value==='true'};if(f.password.value)p.password=f.password.value;try{if(u.id)await api(`/api/admin/users/${u.id}`,'PATCH',p);else await api('/api/admin/users','POST',p);await loadUsers();state.editing=null;renderUsers();await loadOverview();CloudPressUI.toast('Usuario guardado.')}catch(err){CloudPressUI.toast(err.message,'error')}}};
   deleteUser=async id=>{if(!await CloudPressUI.confirm({title:'Eliminar usuario',message:'Esta cuenta se eliminará definitivamente y no podrá iniciar sesión.',confirmLabel:'Eliminar usuario',destructive:true}))return;try{await api(`/api/admin/users/${id}`,'DELETE');await loadUsers();renderUsers();await loadOverview();CloudPressUI.toast('Usuario eliminado.')}catch(e){CloudPressUI.toast(e.message,'error')}};
   $('#upload-media').onclick=uploadMedia;
-</script><script src="/plugin-content-admin.js"></script>
+</script><script src="/plugin-content-admin.js?v=20260915-2"></script>
 <script>
   (() => {
     const labelRows = () => document.querySelectorAll('.row-actions .link-button').forEach(button => {
