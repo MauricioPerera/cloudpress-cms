@@ -33,3 +33,19 @@ Las verificaciones HTTP mínimas son:
 8. Rotar el secreto de `commerce-event` con `POST /api/admin/plugins/cloudpress-commerce/webhooks/commerce-event`. Guarda el `token` devuelto una sola vez y llama `POST /api/plugins/cloudpress-commerce/webhooks/commerce-event` con el header `x-cloudpress-webhook-token`. Debe devolver 200; un token distinto devuelve 401. Confirma `webhook_rotated` y `webhook_succeeded` en `plugin_audit_log`.
 
 No se debe usar contenido real para estas pruebas. Borra la cuenta y los datos QA al finalizar.
+
+## Matriz de aceptación
+
+| Criterio | Evidencia reproducible | Resultado observable |
+| --- | --- | --- |
+| 1. Descubrimiento e instalación | `npm run plugins:build`, `npm test`, después `POST /api/admin/plugins` y `GET /api/admin/plugins` | Commerce aparece en `available` y conserva `enabled` tras otra lectura. |
+| 2. CRUD de tipo declarado | Crear `product`, `PATCH /api/admin/content/<id>`, `DELETE`, `POST /api/admin/trash/<id>` | El listado por `?contentType=product` refleja alta, edición, papelera y restauración. La UI ofrece los mismos recorridos. |
+| 3. Metadatos | `PUT` y `GET /api/admin/plugin-meta` para `scope=content` y `scope=user` | Valor persistido; valor que excede `maxLength` devuelve `422`. |
+| 4. Acciones/auditoría | Ejecutar una acción válida y repetirla con SKU duplicado; consultar `plugin_audit_log` | `action_succeeded` y `action_failed` contienen actor, input y resultado/error. |
+| 5. Permisos/rutas | Llamar catálogo sin cookie y con usuario `buy-products` | `403` sin permiso y `200` con la capacidad. |
+| 6. Migración/reversión | Instalar, consultar `plugin_migrations`, desinstalar y volver a consultar | La migración namespaced se registra una vez y se elimina con la instalación; no se ejecuta DDL de plugin arbitrario. |
+| 7. Tarea idempotente | Ajustar inventario dos veces con el mismo estado y ejecutar `jobs/run` | Sólo existe una fila por `task_id,dedupe_key`; estado `completed` y resultado observable. |
+| 8. UI administrativa | `npm run test:plugin-admin-ui` y abrir `plugin-admin.html?plugin=cloudpress-commerce` | Panel, listado, editor, taxonomías, papelera, acciones, diagnóstico, privacidad y webhooks. |
+| 9. Privacidad | `GET` y `DELETE /privacy/<userId>` | Exportación contiene registros/metadatos declarados; la segunda lectura está vacía. |
+| 10. Ciclo de vida | `PATCH status=disabled`, `DELETE /api/admin/plugins/cloudpress-commerce` | Rutas y esquema devuelven `404`/no contienen UI; datos se preservan o purgan según `uninstallPolicy`. |
+| 11. Commerce de referencia | `npm run test:plugin-host` y pasos HTTP 3–5 | Productos, clientes, inventario, carrito y pedidos de prueba funcionan sin pagos reales. |
