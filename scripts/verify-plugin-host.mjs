@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import commerce from "../plugins/cloudpress-commerce/plugin.js";
 import { generatedPluginRegistry } from "../functions/_plugins/generated-registry.js";
+import { auditSnapshot } from "../functions/_plugins/host.js";
 
 assert.equal(generatedPluginRegistry.get("cloudpress-commerce")?.manifest.id, "cloudpress-commerce", "El registro generado debe descubrir Commerce sin editar el core.");
 
@@ -46,4 +47,5 @@ assert.equal((await context.data.get("events", `webhook-${webhook.id}`)).value.e
 await assert.rejects(() => commerce.webhooks["commerce-event"](context, { body: {} }), /Evento de Commerce inválido/);
 await assert.rejects(() => commerce.actions["adjust-inventory"](context, { sku: "QA-SKU-1", delta: -9 }), /Inventario insuficiente/);
 assert.ok(audits.some((entry) => entry.action === "commerce_order_created"));
-console.log(JSON.stringify({ ok: true, checks: ["product", "customer", "duplicate-customer", "duplicate-sku", "inventory", "idempotent-job", "cart", "order", "task", "webhook", "insufficient-stock", "audit"] }, null, 2));
+assert.deepEqual(JSON.parse(auditSnapshot({ password: "no-visible", token: "no-visible", name: "QA" })), { password: "[redacted]", token: "[redacted]", name: "QA" });
+console.log(JSON.stringify({ ok: true, checks: ["product", "customer", "duplicate-customer", "duplicate-sku", "inventory", "idempotent-job", "cart", "order", "task", "webhook", "insufficient-stock", "redacted-audit", "audit"] }, null, 2));

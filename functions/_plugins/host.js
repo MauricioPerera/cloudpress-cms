@@ -4,6 +4,12 @@ const idPattern = /^[a-z0-9][a-z0-9-]{2,47}$/;
 const safeJson = (value) => JSON.parse(JSON.stringify(value ?? null));
 const now = () => new Date().toISOString();
 
+export function auditSnapshot(value) {
+  const redact = (item, depth = 0) => { if (depth > 4) return "[truncated-depth]"; if (Array.isArray(item)) return item.slice(0, 30).map((value) => redact(value, depth + 1)); if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).slice(0, 40).map(([key, value]) => [key, /password|token|secret|authorization/i.test(key) ? "[redacted]" : redact(value, depth + 1)])); if (typeof item === "string") return item.slice(0, 1000); return item; };
+  const snapshot = redact(safeJson(value));
+  return JSON.stringify(snapshot).slice(0, 4000);
+}
+
 export async function enabledPlugin(env, id) {
   const plugin = pluginRegistry.get(id);
   if (!plugin) return null;
