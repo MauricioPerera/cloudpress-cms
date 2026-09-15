@@ -1,5 +1,6 @@
 # Account-specific configuration and local runtime state
 wrangler.jsonc
+scheduler/wrangler.jsonc
 .dev.vars
 .wrangler/
 

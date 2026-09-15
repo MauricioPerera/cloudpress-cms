@@ -1,6 +1,7 @@
 import { json, requireAdmin, sanitizeHtml } from "../../../_shared.js";
 import { runPluginHook } from "../../../_plugins/runtime.js";
 import { renderBlocksDocument, replaceBlocksDocument } from "../../../_blocks.js";
+import { publicationState } from "../../../_scheduler.js";
 
 const validKind = (kind) => kind === "post" || kind === "page";
 const validStatus = (status) => status === "draft" || status === "published";
@@ -61,14 +62,32 @@ export async function onRequestPatch({ request, env, params }) {
   let next;
   try { next = applyPatch(proposed, before.patch); }
   catch (error) { return json({ error: error.message }, 422); }
+  const now = new Date();
+  const hasPublishedAt = Object.prototype.hasOwnProperty.call(body, "publishedAt");
+  let publishedAt = current.published_at;
+  let scheduled = false;
+  if (hasPublishedAt && body.publishedAt !== null && body.publishedAt !== "") {
+    const requestedDate = new Date(body.publishedAt);
+    if (Number.isNaN(requestedDate.getTime())) return json({ error: "Fecha de publicación inválida" }, 400);
+    if (next.status !== "published") return json({ error: "Una fecha de publicación requiere estado publicado." }, 400);
+  }
+  if (next.status === "published") {
+    const requestedAt = hasPublishedAt ? body.publishedAt : current.published_at;
+    try {
+      const publication = publicationState({ status: "published", publishedAt: requestedAt, now });
+      next = { ...next, status: publication.status };
+      publishedAt = publication.publishedAt;
+      scheduled = publication.scheduled;
+    } catch (error) { return json({ error: error.message }, 400); }
+  } else if (body.status === "draft") publishedAt = null;
   const fields = [["kind", "kind"], ["contentType", "content_type"], ["title", "title"], ["slug", "slug"], ["excerpt", "excerpt"], ["body", "body"], ["status", "status"]];
   const updates = []; const values = [];
   for (const [key, column] of fields) if (next[key] !== (key === "contentType" ? current.content_type : current[key])) { updates.push(`${column} = ?`); values.push(next[key]); }
-  if (next.status === "published" && !current.published_at) { updates.push("published_at = ?"); values.push(new Date().toISOString()); }
+  if ((publishedAt || null) !== (current.published_at || null)) { updates.push("published_at = ?"); values.push(publishedAt); }
   const hasTerms = Array.isArray(body.termIds), hasPluginTerms = Array.isArray(body.pluginTermIds), hasBlockChange = body.blocks !== undefined, hasRawBodyChange = body.blocks === undefined && body.body !== undefined;
   if (!updates.length && !hasTerms && !hasPluginTerms && !hasBlockChange && !hasRawBodyChange) return json({ error: "No hay cambios válidos" }, 400);
   if (updates.length) {
-    updates.push("updated_at = ?"); values.push(new Date().toISOString(), id);
+    updates.push("updated_at = ?"); values.push(now.toISOString(), id);
     try { await env.DB.batch([snapshot(env.DB, current), env.DB.prepare(`UPDATE content_items SET ${updates.join(", ")} WHERE id = ?`).bind(...values)]); }
     catch { return json({ error: "No se pudo guardar la revisión; revisa que el slug sea único" }, 409); }
   }
@@ -77,7 +96,7 @@ export async function onRequestPatch({ request, env, params }) {
   else if (hasRawBodyChange) await replaceBlocksDocument(env, id, null);
   const persisted = await env.DB.prepare("SELECT id, kind, content_type, title, slug, excerpt, body, status FROM content_items WHERE id=?").bind(id).first();
   await runPluginHook(env, "content.afterUpdate", hookContent(persisted, admin.id));
-  return json({ ok: true });
+  return json({ ok: true, scheduled, publishedAt });
 }
 
 export async function onRequestDelete({ request, env, params }) {

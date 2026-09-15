@@ -90,11 +90,11 @@ export const reversibleTools = [
   {
     name: "cloudpress_update_content",
     title: "Actualizar contenido",
-    description: "Actualiza cualquier entrada, página o tipo de contenido activo y conserva una revisión previa. Úsala para correcciones que puedan revertirse desde CloudPress.",
-    inputSchema: z.object({ id: z.number().int().positive(), kind: z.enum(["post", "page"]).optional(), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180).optional(), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), status: z.enum(["draft", "published"]).optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional() }).strict(),
+    description: "Actualiza cualquier entrada, página o tipo de contenido activo y conserva una revisión previa. Con status publicado y publishedAt futuro, programa la publicación. Úsala para correcciones que puedan revertirse desde CloudPress.",
+    inputSchema: z.object({ id: z.number().int().positive(), kind: z.enum(["post", "page"]).optional(), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180).optional(), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), status: z.enum(["draft", "published"]).optional(), publishedAt: z.string().datetime({ offset: true }).nullable().optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional() }).strict(),
     async execute({ id, ...changes }) {
       if (!Object.keys(changes).length) throw new Error("Indica al menos un cambio.");
-      await api(`/api/admin/entries/${id}`, "PATCH", changes); visible(`Contenido ${id} actualizado; hay una revisión previa disponible.`); return { id, updated: true, reversibleVia: "revisiones" };
+      const data = await api(`/api/admin/entries/${id}`, "PATCH", changes); visible(data.scheduled ? `Contenido ${id} programado; hay una revisión previa disponible.` : `Contenido ${id} actualizado; hay una revisión previa disponible.`); return { id, updated: true, scheduled: Boolean(data.scheduled), publishedAt: data.publishedAt || null, reversibleVia: "revisiones" };
     },
   },
   {

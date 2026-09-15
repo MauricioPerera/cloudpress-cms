@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4.103.0/config-schema.json",
+  "name": "cloudpress-scheduler",
+  "main": "index.js",
+  "compatibility_date": "2026-09-15",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cloudpress-db",
+      "database_id": "YOUR_D1_DATABASE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
