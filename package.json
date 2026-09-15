@@ -11,12 +11,13 @@
     "test:totp": "node scripts/verify-totp.mjs",
     "test:totp-recovery": "node scripts/verify-totp-recovery.mjs",
     "test:recovery-pdf": "node scripts/verify-recovery-pdf.mjs",
+    "test:scheduler": "node scripts/verify-scheduler.mjs",
     "test:fastwebmcp": "node scripts/verify-fastwebmcp.mjs",
     "test:plugin-host": "node scripts/verify-plugin-host.mjs",
     "test:plugin-admin-ui": "node scripts/verify-plugin-admin-ui.mjs",
     "test:schema": "node scripts/verify-schema-contract.mjs",
     "test:syntax": "node scripts/check-syntax.mjs",
-    "test": "npm run webmcp:build && npm run plugins:build && npm run plugins:validate && npm run test:plugin-host && npm run test:plugin-admin-ui && npm run test:http-guards && npm run test:approvals && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
+    "test": "npm run webmcp:build && npm run plugins:build && npm run plugins:validate && npm run test:plugin-host && npm run test:plugin-admin-ui && npm run test:http-guards && npm run test:approvals && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:scheduler && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
   },
   "devDependencies": {
     "acorn": "^8.18.0",

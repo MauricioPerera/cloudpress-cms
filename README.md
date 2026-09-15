@@ -48,6 +48,7 @@ wrangler pages deploy . --project-name cloudpress --branch main
 | Static frontend and edge routes | Pages + Pages Functions |
 | Users, sessions, content, taxonomies, audit data | D1 |
 | Media library | R2 |
+| Scheduled publication and plugin jobs | Separate Cloudflare Worker + Cron Trigger |
 | Recuperación de cuenta | Google Authenticator (TOTP) + PIN local LSFA; correo opcional |
 | Agent administration | WebMCP, exposed only to authenticated administrators |
 | Authoring | Native structured block documents, rendered to sanitized HTML |
@@ -71,6 +72,8 @@ Plugins are source-controlled code compiled into the Pages Functions bundle. The
 The core exposes a fixed content lifecycle to plugins: create, update, trash and restore, each with `before*` and `after*` hooks. `beforeCreate` and `beforeUpdate` may apply the constrained content patch; all other `before*` hooks may veto. Plugins cannot define arbitrary hook names, which prevents a manifest from claiming an event the core never dispatches.
 
 CloudPress has its own block-editor document model; it does not load WordPress Gutenberg. `content_documents.blocks_json` is the structured source for block-authored content and `content_items.body` is its server-rendered, sanitized HTML counterpart. Existing HTML content opens as a preserved legacy block. Plugins can declare namespaced blocks through `blocks:define`; the core renders their attribute inspector from the manifest schema and executes only their statically compiled, validator-attested renderer.
+
+Publication scheduling and queued plugin tasks run in the separate [`scheduler/`](scheduler/) Worker, because Pages Functions do not receive Cron Trigger events. A future publication is stored as a draft with its `published_at` timestamp; the scheduler atomically promotes it when due. Plugin jobs run only while their plugin remains enabled, are claimed atomically, and a job left in `running` state for 20 minutes is made available again on the next run. See the deployment runbook before enabling the trigger.
 
 ## Quality gates
 

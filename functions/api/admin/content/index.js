@@ -1,6 +1,7 @@
 import { json, requireAdmin, sanitizeHtml } from "../../../_shared.js";
 import { runPluginHook } from "../../../_plugins/runtime.js";
 import { renderBlocksDocument, saveBlocksDocument } from "../../../_blocks.js";
+import { publicationState } from "../../../_scheduler.js";
 
 const validKind = (kind) => kind === "post" || kind === "page";
 const validStatus = (status) => status === "draft" || status === "published";
@@ -55,18 +56,21 @@ export async function onRequestPost({ request, env }) {
   status = transformed.status || "draft";
   if (!validKind(kind) || !title || !slug || !validStatus(status)) return json({ error: "El plugin generó contenido inválido" }, 422);
   contentType = String(transformed.contentType || contentType);
-  const now = new Date().toISOString();
+  const now = new Date();
   const scheduledAt = body?.publishedAt ? new Date(body.publishedAt) : null;
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return json({ error: "Fecha de publicación inválida" }, 400);
+  if (scheduledAt && status !== "published") return json({ error: "Una fecha de publicación requiere estado publicado." }, 400);
+  const publication = publicationState({ status, publishedAt: scheduledAt, now });
+  status = publication.status;
   try {
     const result = await env.DB.prepare("INSERT INTO content_items (kind, content_type, title, slug, excerpt, body, status, author_id, updated_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(kind, contentType, title, slug, String(transformed.excerpt || "").slice(0, 500), sanitizeHtml(renderedBlocks ? renderedBlocks.html : String(transformed.body || "")).slice(0, 50000), status, admin.id, now, status === "published" ? (scheduledAt ? scheduledAt.toISOString() : now) : null).run();
+      .bind(kind, contentType, title, slug, String(transformed.excerpt || "").slice(0, 500), sanitizeHtml(renderedBlocks ? renderedBlocks.html : String(transformed.body || "")).slice(0, 50000), status, admin.id, now.toISOString(), publication.publishedAt).run();
     const ids=[...new Set((Array.isArray(body?.termIds)?body.termIds:[]).map(Number).filter(Number.isInteger))];
     if(ids.length) await env.DB.batch(ids.map(id=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(result.meta.last_row_id,id)));
     const pluginTermIds=[...new Set((Array.isArray(body?.pluginTermIds)?body.pluginTermIds:[]).map(Number).filter(Number.isInteger))];
     if(pluginTermIds.length) await env.DB.batch(pluginTermIds.map(id=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(result.meta.last_row_id,id)));
     if (renderedBlocks) await saveBlocksDocument(env, result.meta.last_row_id, renderedBlocks.document);
     await runPluginHook(env, "content.afterCreate", { id: result.meta.last_row_id, kind, title, slug, status, excerpt: String(transformed.excerpt || ""), body: String(transformed.body || ""), authorId: admin.id });
-    return json({ ok: true, id: result.meta.last_row_id }, 201);
+    return json({ ok: true, id: result.meta.last_row_id, scheduled: publication.scheduled, publishedAt: publication.publishedAt }, 201);
   } catch { return json({ error: "El slug ya está en uso" }, 409); }
 }
