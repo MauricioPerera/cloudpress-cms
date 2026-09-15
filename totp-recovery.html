@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recuperar con autenticador · CloudPress</title>
+<style>body{font:16px system-ui;background:#f0f0f1;margin:0;display:grid;place-items:center;min-height:100vh}.card{background:#fff;border:1px solid #dcdcde;padding:28px;width:min(430px,calc(100% - 32px))}input,button{box-sizing:border-box;width:100%;padding:10px;margin:8px 0;font:inherit}input{border:1px solid #8c8f94}button{background:#2271b1;border:1px solid #2271b1;color:#fff;cursor:pointer}#message{white-space:pre-wrap}.muted{color:#646970}</style>
+<main class="card"><h1>Recuperar con autenticador</h1><p>CloudPress verificará tu código de Google Authenticator. El companion LSFA te pedirá después el PIN local antes de cambiar la contraseña.</p><form id="recovery"><label>Usuario<input name="username" autocomplete="username" required></label><label>Nueva contraseña<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><label>Código de Google Authenticator<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"></label><label class="muted">O código de respaldo<input name="recoveryCode" autocomplete="off"></label><button>Verificar y recuperar</button></form><p id="message" role="status"></p><p><a href="/forgot-password.html">Usar recuperación por correo</a></p></main>
+<script>
+const form=document.querySelector('#recovery'),message=document.querySelector('#message'),origin=location.origin;
+async function api(url,init){const r=await fetch(url,init),d=await r.json().catch(()=>({error:'Respuesta inválida'}));if(!r.ok)throw Error(d.error||'Error');return d}
+form.onsubmit=async event=>{
+  event.preventDefault();
+  const values=Object.fromEntries(new FormData(form));
+  if(!/^\d{6}$/.test(values.code)&&!values.recoveryCode.trim())return message.textContent='Escribe el código del autenticador o un código de respaldo.';
+  try{
+    message.textContent='Preparando confirmación local…';
+    const prepared=await api('/api/totp-recovery/prepare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:values.username})});
+    const response=await fetch('http://127.0.0.1:9463/v1/cloudpress/totp-recovery',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({protocol:'lsfa',version:'0.2',origin,request:{request_id:prepared.requestId,operation:'cloudpress_totp_recovery',purpose:'Restablecer exclusivamente la contraseña de esta cuenta.',risk:'high',expires_at:prepared.expiresAt,summary:{operation:'recover_account',username:values.username}},verify:{url:origin+'/api/totp-recovery/'+prepared.requestId+'/verify',token:prepared.recoveryToken},execute:{url:origin+'/api/totp-recovery/'+prepared.requestId+'/complete'},credentials:{new_password:values.password,totp_code:values.code,recovery_code:values.recoveryCode}})});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.status!=='accepted')throw Error('La recuperación no fue aprobada.');
+    message.style.color='#146c43';message.textContent='Contraseña actualizada. Ya puedes iniciar sesión.';setTimeout(()=>location.href='/login.html',1000);
+  }catch(error){message.style.color='#b32d2e';message.textContent=/fetch/i.test(error.message)?'Inicia el companion LSFA local e inténtalo de nuevo.':error.message}
+};
+</script>

@@ -1,0 +1,54 @@
+{
+  "contractVersion": "cloudpress-plugin/v2",
+  "id": "cloudpress-commerce",
+  "name": "CloudPress Commerce",
+  "version": "0.1.0",
+  "description": "Comercio de referencia para productos, clientes, inventario, carritos y pedidos de prueba.",
+  "uninstallPolicy": "preserve-content-purge-plugin-storage",
+  "hooks": ["content.beforeCreate"],
+  "permissions": ["content:read", "content:transform", "content-types:define", "content-meta:define", "user-meta:define", "actions:register", "taxonomies:define", "admin-ui:register", "storage:read", "storage:write", "routes:register", "jobs:enqueue", "privacy:manage", "diagnostics:read", "capabilities:define"],
+  "capabilities": [
+    { "id": "manage-commerce", "label": "Gestionar comercio", "defaultRoles": ["admin"] },
+    { "id": "manage-inventory", "label": "Gestionar inventario", "defaultRoles": ["admin", "author"] },
+    { "id": "buy-products", "label": "Comprar productos", "defaultRoles": ["admin", "author", "user"] }
+  ],
+  "contentTypes": [
+    { "id": "product", "label": "Productos", "supports": ["title", "body", "excerpt"] },
+    { "id": "order", "label": "Pedidos", "supports": ["title", "body", "excerpt"] }
+  ],
+  "taxonomies": [
+    { "id": "product-category", "label": "Categorías de producto", "hierarchical": true, "objectTypes": ["product"] },
+    { "id": "product-tag", "label": "Etiquetas de producto", "hierarchical": false, "objectTypes": ["product"] }
+  ],
+  "contentMeta": [
+    { "key": "cloudpress-commerce.sku", "type": "string", "required": true, "schema": { "maxLength": 80 } },
+    { "key": "cloudpress-commerce.price", "type": "number", "required": true },
+    { "key": "cloudpress-commerce.stock", "type": "number", "required": true },
+    { "key": "cloudpress-commerce.manage-stock", "type": "boolean", "required": false },
+    { "key": "cloudpress-commerce.gallery", "type": "json", "required": false },
+    { "key": "cloudpress-commerce.attributes", "type": "json", "required": false }
+  ],
+  "userMeta": [
+    { "key": "cloudpress-commerce.customer-profile", "type": "json", "required": false },
+    { "key": "cloudpress-commerce.customer-note", "type": "string", "required": false, "schema": { "maxLength": 1000 } }
+  ],
+  "actions": [
+    { "id": "create-product", "label": "Crear producto", "scope": "content", "handler": "create-product", "capability": "manage-commerce", "inputSchema": { "type": "object", "required": ["sku", "name", "price", "stock"], "properties": { "sku": { "type": "string", "maxLength": 80 }, "name": { "type": "string", "maxLength": 180 }, "price": { "type": "number" }, "stock": { "type": "number" } } } },
+    { "id": "adjust-inventory", "label": "Ajustar inventario", "scope": "content", "handler": "adjust-inventory", "capability": "manage-inventory", "inputSchema": { "type": "object", "required": ["sku", "delta"], "properties": { "sku": { "type": "string", "maxLength": 80 }, "delta": { "type": "number" } } } },
+    { "id": "add-cart-item", "label": "Añadir al carrito", "scope": "user", "handler": "add-cart-item", "capability": "buy-products", "inputSchema": { "type": "object", "required": ["sku", "quantity"], "properties": { "sku": { "type": "string", "maxLength": 80 }, "quantity": { "type": "number" } } } },
+    { "id": "create-order", "label": "Crear pedido de prueba", "scope": "site", "handler": "create-order", "capability": "buy-products", "inputSchema": { "type": "object", "properties": {} } }
+  ],
+  "routes": [
+    { "path": "/catalog", "methods": ["GET"], "handler": "catalog", "capability": "buy-products" },
+    { "path": "/cart", "methods": ["GET"], "handler": "cart", "capability": "buy-products" }
+  ],
+  "tasks": [
+    { "id": "inventory-reconciled", "label": "Conciliar inventario", "handler": "inventory-reconciled" }
+  ],
+  "menus": [
+    { "id": "commerce", "label": "Comercio", "view": "commerce", "capability": "manage-commerce" }
+  ],
+  "migrations": [
+    { "id": "commerce-storage-v1", "collections": ["products", "carts", "orders", "events"] }
+  ]
+}

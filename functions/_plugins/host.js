@@ -1,4 +1,4 @@
-import { pluginRegistry } from "./registry.js";
+import { pluginRegistry, pluginRelease } from "./registry.js";
 
 const idPattern = /^[a-z0-9][a-z0-9-]{2,47}$/;
 const safeJson = (value) => JSON.parse(JSON.stringify(value ?? null));
@@ -11,10 +11,16 @@ export function auditSnapshot(value) {
 }
 
 export async function enabledPlugin(env, id) {
-  const plugin = pluginRegistry.get(id);
-  if (!plugin) return null;
-  const installed = await env.DB.prepare("SELECT status FROM plugin_installations WHERE plugin_id=?").bind(id).first();
-  return installed?.status === "enabled" ? plugin : null;
+  let installed;
+  try {
+    installed = await env.DB.prepare("SELECT p.status,a.source_hash FROM plugin_installations p LEFT JOIN plugin_active_releases a ON a.plugin_id=p.plugin_id WHERE p.plugin_id=?").bind(id).first();
+  } catch {
+    // Existing installations remain usable while their active-release table is initialized.
+    installed = await env.DB.prepare("SELECT status,NULL AS source_hash FROM plugin_installations WHERE plugin_id=?").bind(id).first();
+  }
+  if (installed?.status !== "enabled") return null;
+  // A pinned but absent hash must fail closed; never substitute newer plugin code.
+  return installed.source_hash ? pluginRelease(id, installed.source_hash) : pluginRegistry.get(id) || null;
 }
 
 export async function pluginAudit(env, pluginId, action, actorId, details = {}) {
@@ -24,9 +30,16 @@ export async function pluginAudit(env, pluginId, action, actorId, details = {}) 
 export function validateInput(schema, value) {
   if (!schema || Object.keys(schema).length === 0) return { valid: true };
   if (schema.type === "object" && (!value || typeof value !== "object" || Array.isArray(value))) return { valid: false, error: "La entrada debe ser un objeto." };
+  if (schema.type === "object" && schema.additionalProperties === false && Object.keys(value).some((key) => !(key in (schema.properties || {})))) return { valid: false, error: "La entrada contiene campos no declarados." };
   for (const key of schema.required || []) if (!(key in (value || {}))) return { valid: false, error: `Falta el campo ${key}.` };
-  for (const [key, rule] of Object.entries(schema.properties || {})) { const item = value?.[key]; if (item === undefined) continue; if (rule.type === "string" && typeof item !== "string") return { valid: false, error: `${key} debe ser texto.` }; if (rule.type === "number" && (typeof item !== "number" || !Number.isFinite(item))) return { valid: false, error: `${key} debe ser número.` }; if (rule.type === "boolean" && typeof item !== "boolean") return { valid: false, error: `${key} debe ser booleano.` }; if (rule.maxLength && String(item).length > rule.maxLength) return { valid: false, error: `${key} excede el tamaño permitido.` }; }
+  for (const [key, rule] of Object.entries(schema.properties || {})) { const item = value?.[key]; if (item === undefined) continue; if (rule.type === "string" && typeof item !== "string") return { valid: false, error: `${key} debe ser texto.` }; if (rule.type === "number" && (typeof item !== "number" || !Number.isFinite(item))) return { valid: false, error: `${key} debe ser número.` }; if (rule.type === "boolean" && typeof item !== "boolean") return { valid: false, error: `${key} debe ser booleano.` }; if (rule.maxLength !== undefined && String(item).length > rule.maxLength) return { valid: false, error: `${key} excede el tamaño permitido.` }; if (rule.minLength !== undefined && String(item).length < rule.minLength) return { valid: false, error: `${key} no alcanza la longitud mínima.` }; if (rule.minimum !== undefined && item < rule.minimum) return { valid: false, error: `${key} es menor al mínimo permitido.` }; if (rule.maximum !== undefined && item > rule.maximum) return { valid: false, error: `${key} excede el máximo permitido.` }; if (rule.pattern !== undefined && rule.type === "string" && !(new RegExp(rule.pattern).test(item))) return { valid: false, error: `${key} no cumple el patrón requerido.` }; }
   return { valid: true };
+}
+
+export async function ensurePluginReleaseTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS plugin_releases (plugin_id TEXT NOT NULL, source_hash TEXT NOT NULL, manifest_hash TEXT NOT NULL, validator_version TEXT NOT NULL, version TEXT NOT NULL, installed_by INTEGER, installed_at TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(plugin_id, source_hash))").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_plugin_releases_current ON plugin_releases(plugin_id, is_current, installed_at DESC)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS plugin_active_releases (plugin_id TEXT PRIMARY KEY, source_hash TEXT NOT NULL, activated_by INTEGER, activated_at TEXT NOT NULL)").run();
 }
 
 export function createPluginContext(env, pluginId, actor) {

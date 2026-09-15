@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import { bytesToBase64, pbkdf2 } from "../functions/_shared.js";
+import { encryptTotpSecret, totpAt } from "../functions/_totp.js";
+import { onRequestPost as prepare } from "../functions/api/totp-recovery/prepare.js";
+import { onRequestPost as verify } from "../functions/api/totp-recovery/[id]/verify.js";
+import { onRequestPost as complete } from "../functions/api/totp-recovery/[id]/complete.js";
+
+const database = new DatabaseSync(":memory:");
+database.exec(await readFile("schema.sql", "utf8"));
+const DB = { prepare(sql) { return { bind(...values) { return { async first() { return database.prepare(sql).get(...values) ?? null; }, async run() { const result = database.prepare(sql).run(...values); return { meta: { changes: Number(result.changes) } }; } }; } }; } };
+DB.batch = async (statements) => Promise.all(statements.map((statement) => statement.run()));
+const encryptionKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
+const salt = crypto.getRandomValues(new Uint8Array(16));
+const passwordHash = await pbkdf2("Contraseña-original", salt);
+await DB.prepare("INSERT INTO users(username,password_hash,password_salt,role) VALUES(?,?,?,?)").bind("qaadmin", bytesToBase64(passwordHash), bytesToBase64(salt), "admin").run();
+const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+await DB.prepare("INSERT INTO totp_credentials(user_id,secret_ciphertext,state) VALUES(?,?, 'active')").bind(1, await encryptTotpSecret({ TOTP_ENCRYPTION_KEY: encryptionKey }, secret)).run();
+const env = { DB, TOTP_ENCRYPTION_KEY: encryptionKey };
+const post = (path, body, headers = {}) => new Request("https://cloudpress.example" + path, { method: "POST", headers: { "content-type": "application/json", "CF-Connecting-IP": "198.51.100.10", ...headers }, body: JSON.stringify(body) });
+
+const prepared = await prepare({ request: post("/api/totp-recovery/prepare", { username: "qaadmin" }), env });
+assert.equal(prepared.status, 200);
+const ticket = await prepared.json();
+assert.equal(typeof ticket.recoveryToken, "string");
+const counter = Math.floor(Date.now() / 30_000);
+const code = await totpAt(secret, counter);
+const verified = await verify({ request: post("/api/totp-recovery/" + ticket.requestId + "/verify", { code }, { "x-cloudpress-recovery-token": ticket.recoveryToken }), env, params: { id: ticket.requestId } });
+assert.deepEqual(await verified.json(), { ok: true, state: "verified" });
+const changed = await complete({ request: post("/api/totp-recovery/" + ticket.requestId + "/complete", { password: "Contraseña-nueva" }, { "x-cloudpress-recovery-token": ticket.recoveryToken }), env, params: { id: ticket.requestId } });
+assert.deepEqual(await changed.json(), { ok: true, state: "used" });
+const replay = await complete({ request: post("/api/totp-recovery/" + ticket.requestId + "/complete", { password: "Otra-contraseña" }, { "x-cloudpress-recovery-token": ticket.recoveryToken, "CF-Connecting-IP": "198.51.100.11" }), env, params: { id: ticket.requestId } });
+assert.equal(replay.status, 400, "Una recuperación no puede ejecutarse dos veces.");
+assert.equal((await DB.prepare("SELECT state FROM totp_recovery_requests WHERE id=?").bind(ticket.requestId).first()).state, "used");
+database.close();
+console.log(JSON.stringify({ ok: true, checks: ["totp-recovery-prepare", "server-otp-verification", "single-use-password-reset"] }));

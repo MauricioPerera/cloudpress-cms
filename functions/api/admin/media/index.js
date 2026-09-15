@@ -1,4 +1,5 @@
 import { json, requireAdmin } from "../../../_shared.js";
+import { defaultMediaMetadata, mediaMetadataByKey, normalizeMediaMetadata, saveMediaMetadata } from "../../../_media.js";
 
 const TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -7,7 +8,11 @@ const safeName = (name) => String(name || "imagen").replace(/[^a-zA-Z0-9._-]/g, 
 export async function onRequestGet({ request, env }) {
   if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
   const listed = await env.MEDIA.list({ prefix: "media/", limit: 500 });
-  return json({ items: listed.objects.map((object) => ({ key: object.key, name: object.key.slice(6), size: object.size, uploaded: object.uploaded, contentType: object.httpMetadata?.contentType || "application/octet-stream", url: `/media/${encodeURIComponent(object.key.slice(6))}` })) }, 200, { "Cache-Control": "no-store" });
+  const byKey = await mediaMetadataByKey(env, listed.objects.map((object) => object.key));
+  return json({ items: listed.objects.map((object) => {
+    const name = object.key.slice(6);
+    return { key: object.key, name, size: object.size, uploaded: object.uploaded, contentType: object.httpMetadata?.contentType || "application/octet-stream", url: `/media/${encodeURIComponent(name)}`, metadata: { ...defaultMediaMetadata(name), ...byKey.get(object.key) } };
+  }) }, 200, { "Cache-Control": "no-store" });
 }
 
 export async function onRequestPost({ request, env }) {
@@ -19,6 +24,20 @@ export async function onRequestPost({ request, env }) {
   if (!TYPES.has(file.type)) return json({ error: "Solo se permiten JPG, PNG, GIF o WebP" }, 415);
   if (file.size > MAX_BYTES) return json({ error: "La imagen supera el límite de 10 MB" }, 413);
   const key = `media/${crypto.randomUUID()}-${safeName(file.name)}`;
+  let suppliedMetadata = {};
+  const rawMetadata = form.get("metadata");
+  if (rawMetadata !== null) {
+    try { suppliedMetadata = JSON.parse(String(rawMetadata)); }
+    catch { return json({ error: "Los metadatos deben ser JSON válido." }, 400); }
+  }
+  let metadata;
+  try { metadata = normalizeMediaMetadata(suppliedMetadata, defaultMediaMetadata(file.name)); }
+  catch (error) { return json({ error: String(error?.message || "Metadatos inválidos.") }, 400); }
   await env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { uploadedBy: String(admin.id), originalName: safeName(file.name) } });
-  return json({ ok: true, key, url: `/media/${encodeURIComponent(key.slice(6))}` }, 201);
+  try { await saveMediaMetadata(env, key, metadata); }
+  catch {
+    await env.MEDIA.delete(key);
+    return json({ error: "No se pudieron guardar los metadatos de la imagen." }, 500);
+  }
+  return json({ ok: true, key, url: `/media/${encodeURIComponent(key.slice(6))}`, metadata }, 201);
 }
