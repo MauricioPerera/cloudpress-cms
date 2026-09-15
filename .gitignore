@@ -1,0 +1,10 @@
+# Account-specific configuration and local runtime state
+wrangler.jsonc
+.dev.vars
+.wrangler/
+
+# Local dependencies and temporary artifacts
+node_modules/
+work/
+.webmcp/
+*.log

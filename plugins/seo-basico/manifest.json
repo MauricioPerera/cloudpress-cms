@@ -1,0 +1,10 @@
+{
+  "contractVersion": "cloudpress-plugin/v1",
+  "id": "seo-basico",
+  "name": "SEO básico",
+  "version": "1.0.0",
+  "description": "Crea un extracto editorial cuando una entrada no tiene uno.",
+  "hooks": ["content.beforeCreate"],
+  "permissions": ["content:read", "content:transform"],
+  "settingsSchema": {}
+}
