@@ -10,23 +10,25 @@ export async function onRequestPatch({ request, env, params }) {
   const id = Number(params.id);
   const body = await request.json().catch(() => null);
   if (!Number.isInteger(id) || id < 1 || !body) return json({ error: "Solicitud inválida" }, 400);
-  const current = await env.DB.prepare("SELECT id, kind, title, slug, excerpt, body, status, published_at FROM content_items WHERE id = ?").bind(id).first();
+  const current = await env.DB.prepare("SELECT id, kind, content_type, title, slug, excerpt, body, status, published_at FROM content_items WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "Contenido no encontrado" }, 404);
   if (current.status === "trash") return json({ error: "Restaura el contenido antes de editarlo" }, 409);
   const updates = []; const values = [];
   if (body.kind !== undefined) { if (!validKind(body.kind)) return json({ error: "Tipo inválido" }, 400); updates.push("kind = ?"); values.push(body.kind); }
+  if (body.contentType !== undefined) { const contentType = String(body.contentType); if (!["post","page"].includes(contentType)) { const type = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first(); if (!type) return json({ error: "Tipo de entrada no declarado por un plugin activo" }, 422); } updates.push("content_type = ?"); values.push(contentType); }
   if (body.title !== undefined) { const title = String(body.title).trim().slice(0, 180); if (!title) return json({ error: "El título es obligatorio" }, 400); updates.push("title = ?"); values.push(title); }
   if (body.slug !== undefined) { const slug = slugify(body.slug); if (!slug) return json({ error: "Slug inválido" }, 400); updates.push("slug = ?"); values.push(slug); }
   if (body.excerpt !== undefined) { updates.push("excerpt = ?"); values.push(String(body.excerpt).slice(0, 500)); }
   if (body.body !== undefined) { updates.push("body = ?"); values.push(sanitizeHtml(String(body.body)).slice(0, 50000)); }
   if (body.status !== undefined) { if (!validStatus(body.status)) return json({ error: "Estado inválido" }, 400); updates.push("status = ?"); values.push(body.status); if (body.status === "published" && !current.published_at) { updates.push("published_at = ?"); values.push(new Date().toISOString()); } }
-  const hasTerms = Array.isArray(body.termIds);
-  if (!updates.length && !hasTerms) return json({ error: "No hay cambios válidos" }, 400);
-  if (!updates.length && hasTerms) { await env.DB.prepare("DELETE FROM content_terms WHERE content_id=?").bind(id).run(); const ids=[...new Set(body.termIds.map(Number).filter(Number.isInteger))]; if(ids.length) await env.DB.batch(ids.map(termId=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(id,termId))); return json({ok:true}); }
+  const hasTerms = Array.isArray(body.termIds), hasPluginTerms = Array.isArray(body.pluginTermIds);
+  if (!updates.length && !hasTerms && !hasPluginTerms) return json({ error: "No hay cambios válidos" }, 400);
+  if (!updates.length && (hasTerms || hasPluginTerms)) { if(hasTerms){ await env.DB.prepare("DELETE FROM content_terms WHERE content_id=?").bind(id).run(); const ids=[...new Set(body.termIds.map(Number).filter(Number.isInteger))]; if(ids.length) await env.DB.batch(ids.map(termId=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(id,termId))); } if(hasPluginTerms){ await env.DB.prepare("DELETE FROM plugin_content_terms WHERE content_id=?").bind(id).run(); const ids=[...new Set(body.pluginTermIds.map(Number).filter(Number.isInteger))]; if(ids.length) await env.DB.batch(ids.map(termId=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(id,termId))); } return json({ok:true}); }
   updates.push("updated_at = ?"); values.push(new Date().toISOString(), id);
   try { await env.DB.batch([snapshot(env.DB, current), env.DB.prepare(`UPDATE content_items SET ${updates.join(", ")} WHERE id = ?`).bind(...values)]); }
   catch { return json({ error: "No se pudo guardar la revisión; revisa que el slug sea único" }, 409); }
   if (hasTerms) { await env.DB.prepare("DELETE FROM content_terms WHERE content_id=?").bind(id).run(); const ids=[...new Set(body.termIds.map(Number).filter(Number.isInteger))]; if(ids.length) await env.DB.batch(ids.map(termId=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(id,termId))); }
+  if (hasPluginTerms) { await env.DB.prepare("DELETE FROM plugin_content_terms WHERE content_id=?").bind(id).run(); const ids=[...new Set(body.pluginTermIds.map(Number).filter(Number.isInteger))]; if(ids.length) await env.DB.batch(ids.map(termId=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(id,termId))); }
   return json({ ok: true });
 }
 

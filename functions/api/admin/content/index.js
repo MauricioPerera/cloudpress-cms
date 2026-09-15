@@ -7,13 +7,15 @@ const slugify = (value) => String(value || "").trim().toLowerCase().normalize("N
 
 export async function onRequestGet({ request, env }) {
   if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
-  const url = new URL(request.url); const kind = url.searchParams.get("kind"); const status = url.searchParams.get("status");
+  const url = new URL(request.url); const kind = url.searchParams.get("kind"); const status = url.searchParams.get("status"); const contentType = url.searchParams.get("contentType");
   if (kind && !validKind(kind)) return json({ error: "Tipo inválido" }, 400);
   if (status && status !== "trash") return json({ error: "Estado inválido" }, 400);
+  if (contentType && !["post","page"].includes(contentType)) { const known = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first(); if (!known) return json({ error: "Tipo de entrada no declarado por un plugin activo" }, 422); }
   const filters = []; const values = [];
   if (kind) { filters.push("content_items.kind = ?"); values.push(kind); }
+  if (contentType) { filters.push("content_items.content_type = ?"); values.push(contentType); }
   filters.push(status === "trash" ? "content_items.status = 'trash'" : "content_items.status != 'trash'");
-  const query = "SELECT content_items.id, content_items.kind, content_items.title, content_items.slug, content_items.excerpt, content_items.body, content_items.status, content_items.trashed_from_status, content_items.trashed_at, content_items.created_at, content_items.updated_at, content_items.published_at, users.username AS author FROM content_items JOIN users ON users.id = content_items.author_id WHERE " + filters.join(" AND ") + " ORDER BY content_items.updated_at DESC LIMIT 200";
+  const query = "SELECT content_items.id, content_items.kind, content_items.content_type, content_items.title, content_items.slug, content_items.excerpt, content_items.body, content_items.status, content_items.trashed_from_status, content_items.trashed_at, content_items.created_at, content_items.updated_at, content_items.published_at, users.username AS author FROM content_items JOIN users ON users.id = content_items.author_id WHERE " + filters.join(" AND ") + " ORDER BY content_items.updated_at DESC LIMIT 200";
   const result = values.length ? await env.DB.prepare(query).bind(...values).all() : await env.DB.prepare(query).all();
   const items = await Promise.all(result.results.map(async (item) => ({
     ...item,
@@ -54,6 +56,8 @@ export async function onRequestPost({ request, env }) {
       .bind(kind, contentType, title, slug, String(transformed.excerpt || "").slice(0, 500), sanitizeHtml(String(transformed.body || "")).slice(0, 50000), status, admin.id, now, status === "published" ? (scheduledAt ? scheduledAt.toISOString() : now) : null).run();
     const ids=[...new Set((Array.isArray(body?.termIds)?body.termIds:[]).map(Number).filter(Number.isInteger))];
     if(ids.length) await env.DB.batch(ids.map(id=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(result.meta.last_row_id,id)));
+    const pluginTermIds=[...new Set((Array.isArray(body?.pluginTermIds)?body.pluginTermIds:[]).map(Number).filter(Number.isInteger))];
+    if(pluginTermIds.length) await env.DB.batch(pluginTermIds.map(id=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(result.meta.last_row_id,id)));
     await runPluginHook(env, "content.afterCreate", { id: result.meta.last_row_id, kind, title, slug, status, excerpt: String(transformed.excerpt || ""), body: String(transformed.body || ""), authorId: admin.id });
     return json({ ok: true, id: result.meta.last_row_id }, 201);
   } catch { return json({ error: "El slug ya está en uso" }, 409); }

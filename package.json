@@ -1,0 +1,11 @@
+{
+  "name": "cloudpress",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "plugins:build": "node scripts/generate-plugin-registry.mjs",
+    "plugins:validate": "node scripts/validate-plugin.mjs plugins/cloudpress-commerce",
+    "test:plugin-host": "node scripts/verify-plugin-host.mjs",
+    "test": "npm run plugins:build && npm run plugins:validate && npm run test:plugin-host"
+  }
+}
