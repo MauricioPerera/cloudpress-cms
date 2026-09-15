@@ -5,7 +5,7 @@ const validUsername = value => /^[a-z0-9_.-]{3,40}$/.test(String(value || "").tr
 export async function onRequestGet({ request, env }) {
   const user = await currentUser(request, env);
   if (!user) return json({ error: "Se requiere iniciar sesión" }, 401);
-  const profile = await env.DB.prepare("SELECT username,email,role,created_at FROM users WHERE id=? AND active=1").bind(user.id).first();
+  const profile = await env.DB.prepare("SELECT users.username,users.email,users.role,users.created_at,COALESCE(totp_credentials.state='active',0) AS totp_enabled FROM users LEFT JOIN totp_credentials ON totp_credentials.user_id=users.id WHERE users.id=? AND users.active=1").bind(user.id).first();
   return profile ? json({ profile }, 200, { "Cache-Control": "no-store" }) : json({ error: "Usuario no encontrado" }, 404);
 }
 

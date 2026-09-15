@@ -1,4 +1,4 @@
-import { currentUser } from "./_shared.js";
+import { currentUser, json } from "./_shared.js";
 
 const adminPaths = new Set([
   "/wp-admin", "/wp-admin.html", "/admin", "/admin.html", "/comentarios", "/comentarios.html",
@@ -10,10 +10,33 @@ const adminPaths = new Set([
 ]);
 const memberPaths = new Set(["/perfil", "/perfil.html"]);
 const authorPaths = new Set(["/editor", "/editor.html"]);
+const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function trustedMutationRequest(request, url) {
+  if (!unsafeMethods.has(request.method)) return true;
+
+  // Webhooks are authenticated by their own bearer-like token in the route
+  // handler. They are intentionally allowed to originate outside the site.
+  if (request.headers.has("x-cloudpress-webhook-token") && url.pathname.startsWith("/api/plugins/")) return true;
+  if (request.headers.has("x-cloudpress-approval-token") && url.pathname.startsWith("/api/admin/approvals/")) return true;
+  if (request.headers.has("x-cloudpress-recovery-token") && url.pathname.startsWith("/api/totp-recovery/")) return true;
+
+  const origin = request.headers.get("Origin");
+  if (origin) return origin === url.origin;
+
+  // Browser requests that omit Origin still carry this fetch metadata. Do not
+  // accept an explicitly cross-site mutation just because it has a session
+  // cookie attached.
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+  return fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none";
+}
 
 export async function onRequest({ request, env, next }) {
   const url = new URL(request.url);
   const path = url.pathname === "/" ? "/" : url.pathname.replace(/\/$/, "");
+  if (!trustedMutationRequest(request, url)) {
+    return json({ error: "La solicitud debe originarse en CloudPress." }, 403, { "Cache-Control": "no-store" });
+  }
   if (!adminPaths.has(path) && !memberPaths.has(path) && !authorPaths.has(path)) return next();
   const user = await currentUser(request, env);
   const allowed = adminPaths.has(path) ? user?.role === "admin"
@@ -25,7 +48,7 @@ export async function onRequest({ request, env, next }) {
     if (contentType.includes("text/html")) {
       const headers = new Headers(response.headers);
       headers.delete("content-length");
-      const pageEnhancements = '<script src="/admin-ui.js"></script><script src="/admin-ui-legacy.js"></script><script type="importmap">{"imports":{"@nekuda/webmcp-sdk":"/webmcp/vendor/nekuda-webmcp-sdk-0.5.0.js"}}</script><script type="module" src="/webmcp/entry.js"></script>';
+      const pageEnhancements = '<script src="/admin-ui.js"></script><script src="/admin-ui-legacy.js"></script><script src="/webmcp/vendor/qrcode-1.5.4.js"></script><script src="/perfil-qr.js"></script><script type="module" src="/recovery-codes-pdf.js"></script><script type="module" src="/webmcp/loader.js"></script>';
       return new Response(pageEnhancements + await response.text(), {
         status: response.status,
         statusText: response.statusText,

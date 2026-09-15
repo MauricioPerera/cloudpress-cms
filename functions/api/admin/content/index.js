@@ -1,5 +1,6 @@
 import { json, requireAdmin, sanitizeHtml } from "../../../_shared.js";
 import { runPluginHook } from "../../../_plugins/runtime.js";
+import { renderBlocksDocument, saveBlocksDocument } from "../../../_blocks.js";
 
 const validKind = (kind) => kind === "post" || kind === "page";
 const validStatus = (status) => status === "draft" || status === "published";
@@ -30,6 +31,9 @@ export async function onRequestPost({ request, env }) {
   const admin = await requireAdmin(request, env);
   if (!admin) return json({ error: "Se requiere rol admin" }, 403);
   const body = await request.json().catch(() => null);
+  let renderedBlocks = null;
+  try { if (body?.blocks !== undefined) renderedBlocks = await renderBlocksDocument(env, body.blocks); }
+  catch (error) { return json({ error: error.message || "Documento de bloques inválido" }, 422); }
   let kind = body?.kind;
   let contentType = String(body?.contentType || kind || "");
   let title = String(body?.title || "").trim().slice(0, 180);
@@ -40,9 +44,11 @@ export async function onRequestPost({ request, env }) {
     const type = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first();
     if (!type) return json({ error: "Tipo de entrada no declarado por un plugin activo" }, 422);
   }
-  const plugin = await runPluginHook(env, "content.beforeCreate", { kind, contentType, title, slug, status, excerpt: String(body?.excerpt || ""), body: String(body?.body || ""), authorId: admin.id });
+  const submittedBody = renderedBlocks ? renderedBlocks.html : String(body?.body || "");
+  const plugin = await runPluginHook(env, "content.beforeCreate", { kind, contentType, title, slug, status, excerpt: String(body?.excerpt || ""), body: submittedBody, authorId: admin.id });
   if (!plugin.allowed) return json({ error: plugin.error }, 422);
   const transformed = { ...body, ...plugin.patch };
+  if (renderedBlocks && plugin.patch.body !== undefined && plugin.patch.body !== submittedBody) return json({ error: "Un plugin no puede transformar HTML directamente cuando el contenido usa bloques." }, 422);
   kind = transformed.kind;
   title = String(transformed.title || "").trim().slice(0, 180);
   slug = slugify(transformed.slug || title);
@@ -54,11 +60,12 @@ export async function onRequestPost({ request, env }) {
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return json({ error: "Fecha de publicación inválida" }, 400);
   try {
     const result = await env.DB.prepare("INSERT INTO content_items (kind, content_type, title, slug, excerpt, body, status, author_id, updated_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(kind, contentType, title, slug, String(transformed.excerpt || "").slice(0, 500), sanitizeHtml(String(transformed.body || "")).slice(0, 50000), status, admin.id, now, status === "published" ? (scheduledAt ? scheduledAt.toISOString() : now) : null).run();
+      .bind(kind, contentType, title, slug, String(transformed.excerpt || "").slice(0, 500), sanitizeHtml(renderedBlocks ? renderedBlocks.html : String(transformed.body || "")).slice(0, 50000), status, admin.id, now, status === "published" ? (scheduledAt ? scheduledAt.toISOString() : now) : null).run();
     const ids=[...new Set((Array.isArray(body?.termIds)?body.termIds:[]).map(Number).filter(Number.isInteger))];
     if(ids.length) await env.DB.batch(ids.map(id=>env.DB.prepare("INSERT OR IGNORE INTO content_terms(content_id,term_id) SELECT ?,id FROM taxonomy_terms WHERE id=?").bind(result.meta.last_row_id,id)));
     const pluginTermIds=[...new Set((Array.isArray(body?.pluginTermIds)?body.pluginTermIds:[]).map(Number).filter(Number.isInteger))];
     if(pluginTermIds.length) await env.DB.batch(pluginTermIds.map(id=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(result.meta.last_row_id,id)));
+    if (renderedBlocks) await saveBlocksDocument(env, result.meta.last_row_id, renderedBlocks.document);
     await runPluginHook(env, "content.afterCreate", { id: result.meta.last_row_id, kind, title, slug, status, excerpt: String(transformed.excerpt || ""), body: String(transformed.body || ""), authorId: admin.id });
     return json({ ok: true, id: result.meta.last_row_id }, 201);
   } catch { return json({ error: "El slug ya está en uso" }, 409); }
