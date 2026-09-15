@@ -37,23 +37,34 @@ Su trigger se ejecuta cada minuto, en UTC. Un contenido guardado con estado **Pu
 ## 2. Actualización de una instancia existente
 
 1. Haz una copia de seguridad aprobada de los datos antes de cualquier migración que reconstruya tablas.
-2. Identifica la última migración aplicada en el registro de despliegue de la instancia. CloudPress aún no mantiene un ledger automático para las migraciones históricas.
-3. Ejecuta cada archivo posterior una sola vez, en orden numérico. Por ejemplo, para actualizar desde `0012`:
+2. Identifica la última migración aplicada en el registro de despliegue de la instancia. En la primera ejecución, establece ese punto como baseline; el ejecutor crea y mantiene `d1_migrations` a partir de entonces. Para una base creada desde el `schema.sql` actual, el baseline es la última migración incluida:
 
 ```powershell
-wrangler d1 execute <database> --remote --file migrations/0013_plugin_audit_actor_cleanup.sql
-wrangler d1 execute <database> --remote --file migrations/0014_plugin_capabilities.sql
-wrangler d1 execute <database> --remote --file migrations/0015_plugin_webhooks.sql
+npm run d1:migrate -- --database <database> --remote --baseline 0017_totp_recovery.sql
 ```
 
-4. Después de confirmar que cada archivo terminó correctamente, registra su nombre en `d1_migrations`. El registro es operativo y manual; no se actualiza al usar `wrangler d1 execute` directamente:
+3. Para una instancia que aún no tenga ninguna migración de CloudPress, usa `--baseline none`. El ejecutor sólo debe recibir este valor cuando el operador haya comprobado que la base parte del estado anterior a `0002_content.sql`:
 
 ```powershell
-wrangler d1 execute <database> --remote --command "INSERT OR IGNORE INTO d1_migrations(name) VALUES ('0015_plugin_webhooks.sql');"
+npm run d1:migrate -- --database <database> --remote --baseline none
+```
+
+4. En adelante, aplica sólo las no registradas. Cada migración y su fila de ledger se ejecutan dentro de una única transacción D1; si falla, no se registra ni se repite parcialmente:
+
+```powershell
+npm run d1:migrate -- --database <database> --remote
+```
+
+Puedes inspeccionar el plan sin cambiar D1 con `--dry-run`; para un ledger vacío añade también el baseline que se usaría en la ejecución real.
+
+Si la instancia histórica tiene un ledger discontinuo, el ejecutor se detiene. Primero verifica en D1 que las tablas, índices y columnas de esas migraciones ya existen; sólo entonces reconcilia hasta el último archivo confirmado. La reconciliación **no ejecuta SQL de migración**, únicamente registra los archivos históricos faltantes:
+
+```powershell
+npm run d1:migrate -- --database <database> --remote --reconcile-to 0017_totp_recovery.sql
 ```
 
 5. Despliega el commit correspondiente sólo después de que las migraciones terminen correctamente.
-6. Conserva en el registro del despliegue el entorno, commit, operador y última migración aplicada. No repitas migraciones que hagan `ALTER TABLE`, creen una tabla temporal o eliminen tablas.
+6. Conserva en el registro del despliegue el entorno, commit, operador y última migración aplicada. No repitas migraciones a mano: el ejecutor se niega a adivinar un ledger vacío para evitar reejecutar migraciones que reconstruyen tablas.
 
 ## 3. Comprobación posterior al despliegue
 

@@ -12,6 +12,8 @@
     "test:totp-recovery": "node scripts/verify-totp-recovery.mjs",
     "test:recovery-pdf": "node scripts/verify-recovery-pdf.mjs",
     "test:scheduler": "node scripts/verify-scheduler.mjs",
+    "test:d1-migrate": "node scripts/verify-d1-migrate.mjs",
+    "d1:migrate": "node scripts/d1-migrate.mjs",
     "test:fastwebmcp": "node scripts/verify-fastwebmcp.mjs",
     "test:plugin-host": "node scripts/verify-plugin-host.mjs",
     "test:plugin-admin-ui": "node scripts/verify-plugin-admin-ui.mjs",
