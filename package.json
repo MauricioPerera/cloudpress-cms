@@ -6,6 +6,7 @@
     "plugins:build": "node scripts/generate-plugin-registry.mjs",
     "plugins:validate": "node scripts/validate-plugin.mjs plugins/cloudpress-commerce",
     "test:plugin-host": "node scripts/verify-plugin-host.mjs",
-    "test": "npm run plugins:build && npm run plugins:validate && npm run test:plugin-host"
+    "test:plugin-admin-ui": "node scripts/verify-plugin-admin-ui.mjs",
+    "test": "npm run plugins:build && npm run plugins:validate && npm run test:plugin-host && npm run test:plugin-admin-ui"
   }
 }
