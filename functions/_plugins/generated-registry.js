@@ -710,7 +710,7 @@ export const generatedPluginReleaseRegistry = new Map([
   "manifestHash": "sha256:0f750b10538869e01da4f9c6520b71373047b99669b242c341a9856fa9a76efe",
   "policy": "static-ast-no-execution"
 }, hooks: plugin0, module: plugin0 }],
-    ["sha256:cdd48b4b8f86344283e38a62e461412aa3ce6e38e4e98685c8fd43d3990b193c", { manifest: {
+    ["sha256:ee38449d4d0ee0f3211b48f256965cb97673311e0c2f089f9a07fa3c23d00fd5", { manifest: {
   "contractVersion": "cloudpress-plugin/v2",
   "id": "cloudpress-commerce",
   "name": "CloudPress Commerce",
@@ -989,7 +989,7 @@ export const generatedPluginReleaseRegistry = new Map([
 }, verification: {
   "valid": true,
   "validatorVersion": "cloudpress-plugin-validator/1",
-  "sourceHash": "sha256:cdd48b4b8f86344283e38a62e461412aa3ce6e38e4e98685c8fd43d3990b193c",
+  "sourceHash": "sha256:ee38449d4d0ee0f3211b48f256965cb97673311e0c2f089f9a07fa3c23d00fd5",
   "manifestHash": "sha256:af56ff5180aad172d87a9ae50e9396c877628e5f5a433a3685dc78dc5ae647e2",
   "policy": "static-ast-no-execution"
 }, hooks: plugin2, module: plugin2 }]
