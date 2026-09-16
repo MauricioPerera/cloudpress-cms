@@ -21,6 +21,17 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS agent_capabilities (
+  id TEXT PRIMARY KEY,
+  actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_capabilities_token ON agent_capabilities(token_hash);
+CREATE INDEX IF NOT EXISTS idx_agent_capabilities_actor ON agent_capabilities(actor_id, expires_at);
+
 -- Registro operacional de las migraciones de CloudPress aplicadas mediante
 -- scripts/d1-migrate.mjs. No almacena secretos ni estado de la aplicación.
 CREATE TABLE IF NOT EXISTS d1_migrations (

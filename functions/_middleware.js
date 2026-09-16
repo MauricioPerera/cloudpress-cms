@@ -48,7 +48,7 @@ export async function onRequest({ request, env, next }) {
     if (contentType.includes("text/html")) {
       const headers = new Headers(response.headers);
       headers.delete("content-length");
-      const pageEnhancements = '<script src="/admin-ui.js"></script><script src="/admin-ui-legacy.js"></script><script src="/webmcp/vendor/qrcode-1.5.4.js"></script><script src="/perfil-qr.js"></script><script type="module" src="/recovery-codes-pdf.js"></script><script type="module" src="/webmcp/loader.js"></script>';
+      const pageEnhancements = '<script src="/admin-ui.js"></script><script src="/admin-ui-legacy.js"></script><script src="/webmcp/vendor/qrcode-1.5.4.js"></script><script src="/perfil-qr.js"></script><script src="/agent-access.js"></script><script type="module" src="/recovery-codes-pdf.js"></script><script type="module" src="/webmcp/loader.js"></script>';
       return new Response(pageEnhancements + await response.text(), {
         status: response.status,
         statusText: response.statusText,

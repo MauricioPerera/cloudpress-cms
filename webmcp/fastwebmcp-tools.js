@@ -1,6 +1,9 @@
 import { z } from "zod";
 
+let agentApi = null;
+export function useAgentApi(request) { agentApi = request; }
 const api = async (path, method = "GET", body) => {
+  if (agentApi) return agentApi(path, method, body);
   const response = await fetch(path, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -43,6 +46,12 @@ function imageFileFromDataUrl(dataUrl, requestedName) {
 }
 
 async function uploadMedia({ filename, dataUrl, metadata }) {
+  if (agentApi) {
+    const data = await api("/api/admin/media-agent", "POST", { filename, dataUrl, metadata });
+    const name = String(data.key || "").replace(/^media\//, "") || filename;
+    visible(`Imagen subida a la biblioteca: ${name}.`);
+    return { key: data.key, name, url: data.url, ...(data.metadata ? { metadata: data.metadata } : {}) };
+  }
   const file = imageFileFromDataUrl(dataUrl, filename);
   const form = new FormData();
   form.append("file", file);

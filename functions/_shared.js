@@ -40,9 +40,18 @@ function cookieValue(request, name) {
 
 async function currentUser(request, env) {
   const token = cookieValue(request, "session");
-  if (!token) return null;
-  const tokenHash = bytesToBase64(await sha256(token));
-  return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now') AND users.active = 1")
+  if (token) {
+    const tokenHash = bytesToBase64(await sha256(token));
+    return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now') AND users.active = 1")
+      .bind(tokenHash).first();
+  }
+  // An LSFA companion holds this opaque capability in the OS credential store.
+  // Browser JavaScript and agents never receive it from CloudPress.
+  const authorization = request.headers.get("Authorization") || "";
+  const match = /^Bearer ([A-Za-z0-9+/=_-]{32,256})$/.exec(authorization);
+  if (!match) return null;
+  const tokenHash = bytesToBase64(await sha256(match[1]));
+  return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM agent_capabilities JOIN users ON users.id = agent_capabilities.actor_id WHERE agent_capabilities.token_hash = ? AND agent_capabilities.revoked_at IS NULL AND agent_capabilities.expires_at > datetime('now') AND users.active = 1")
     .bind(tokenHash).first();
 }
 

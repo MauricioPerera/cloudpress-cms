@@ -10,6 +10,15 @@ await build({
   outfile: "webmcp/vendor/fastwebmcp-0.5.0.js",
 });
 await build({
+  entryPoints: ["webmcp/agent-entry.js"],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: ["es2022"],
+  minify: true,
+  outfile: "webmcp/vendor/cloudpress-agent.js",
+});
+await build({
   entryPoints: ["webmcp/qr-entry.js"],
   bundle: true,
   format: "iife",

@@ -4,7 +4,10 @@
   window.confirm = () => approved;
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
-    if (!button || approved || button.classList.contains('del')) return;
+    // CloudPressUI dialogs already own their confirmation lifecycle. The
+    // legacy bridge must only wrap native browser-confirm actions; otherwise
+    // accepting a modern dialog creates a second confirmation indefinitely.
+    if (!button || button.closest('#cloudpress-ui') || button.dataset.cloudpressConfirm === 'modern' || approved || button.classList.contains('del')) return;
     const label = button.textContent.trim();
     const destructive = /^(Eliminar|Desinstalar|Restaurar ahora|Enviar a papelera)/i.test(label);
     if (!destructive) return;
