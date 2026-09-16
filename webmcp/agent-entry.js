@@ -11,9 +11,10 @@ addEventListener("pagehide", () => controller.abort(), { once: true });
 
 const status = document.querySelector("#cloudpress-agent-status");
 try {
-  const response = await fetch("http://127.0.0.1:9463/v1/cloudpress/agent-status", { mode: "cors", credentials: "omit" });
+  const token = localStorage.getItem("cloudpress.lsfa.channel.v1");
+  const response = await fetch("http://127.0.0.1:9463/v1/cloudpress/agent-status", { mode: "cors", credentials: "omit", headers: token ? { "x-lsfa-channel-token": token } : {} });
   const companion = await response.json();
-  if (!response.ok || !companion.enrolled || !companion.linked) throw new Error("not_ready");
+  if (!response.ok || !companion.enrolled || !companion.linked || !companion.authorized) throw new Error("not_ready");
   status.textContent = "Companion LSFA conectado y capacidad local disponible.";
 } catch {
   status.textContent = "Este navegador debe permitir el acceso a la red local para contactar el companion LSFA de este equipo.";

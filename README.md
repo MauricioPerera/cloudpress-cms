@@ -57,7 +57,7 @@ wrangler pages deploy . --project-name cloudpress --branch main
 
 - [`agent-setup/prompt.md`](agent-setup/prompt.md) is the safe operating guide copied by the public onboarding button.
 - [`plugins/LLM_PLUGIN_PROMPT.md`](plugins/LLM_PLUGIN_PROMPT.md) is the exact contract for an LLM to create, review and validate a CloudPress plugin. The local SDK validator parses code without importing or executing it, blocks prohibited capabilities, and emits source and manifest hashes which are included in the compiled registry. A browser agent can then install, activate, or select an archived release only when its attested hash is already present in that deployment.
-- FastWebMCP operations use the same server-side authorization and soft-delete safeguards as the UI. Agents must not handle passwords or session cookies. Irreversible operations require the LSFA companion described in [`docs/FASTWEBMCP_LSFA.md`](docs/FASTWEBMCP_LSFA.md).
+- FastWebMCP operations use a revocable, route-scoped capability held by the LSFA companion. CloudPress enforces the same explicit route/method scope server-side, so a capability is not a general Admin bearer. Agents must not handle passwords or session cookies. Irreversible operations require the LSFA companion described in [`docs/FASTWEBMCP_LSFA.md`](docs/FASTWEBMCP_LSFA.md).
 
 En Perfil, cada usuario puede activar un autenticador compatible con Google Authenticator. CloudPress cifra el secreto TOTP con el secreto de Pages TOTP_ENCRYPTION_KEY y ofrece códigos de respaldo de un solo uso. La recuperación sin correo se realiza en [totp-recovery.html](totp-recovery.html) mediante el companion LSFA local: CloudPress verifica el OTP y LSFA exige el PIN local antes del cambio de contraseña.
 
@@ -65,7 +65,9 @@ En Perfil, cada usuario puede activar un autenticador compatible con Google Auth
 
 Do not commit `.dev.vars`, `wrangler.jsonc`, access tokens, SMTP/Resend credentials, or production resource identifiers. The provided `.gitignore` excludes local configuration and runtime artifacts.
 
-All browser mutations are checked in the Pages middleware: requests must be same-origin (or carry same-origin fetch metadata). Plugin webhook requests with their dedicated token header are allowed through to their endpoint, which verifies that token. This is an additional CSRF defense; session authorization is still enforced by each API route.
+All browser mutations are checked in the Pages middleware: requests must be same-origin (or carry same-origin fetch metadata). Plugin webhooks, one-time approval execution and the non-browser LSFA companion use dedicated authenticated headers and are authorized again by their endpoint. This is an additional CSRF defense; session or scoped-capability authorization is still enforced by each API route.
+
+The loopback companion does not treat CORS or the `Origin` header as process authentication. Agent requests require a separate one-time-provisioned channel credential. The operating-system account and its credential store remain the local trust boundary; see the threat model and capability lifecycle in [`docs/FASTWEBMCP_LSFA.md`](docs/FASTWEBMCP_LSFA.md).
 
 Plugins are source-controlled code compiled into the Pages Functions bundle. The plugin contract limits the host APIs exposed to a plugin, but it is **not** a runtime sandbox for arbitrary third-party code. The deterministic validator is a technical-policy gate, not proof that a plugin fulfils a business request. The creating agent must inspect the code, keep permissions minimal, run acceptance tests for the requested behavior, and only then deploy and install it. A pinned release is selected by its attested source hash; if a requested hash is absent from the current bundle, CloudPress fails closed rather than executing the latest code. Archived release source must be preserved in `plugins/<id>/releases/<version>/` before it can be selected.
 

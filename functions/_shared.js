@@ -38,18 +38,59 @@ function cookieValue(request, name) {
   return item ? decodeURIComponent(item.slice(name.length + 1)) : null;
 }
 
-async function currentUser(request, env) {
-  const token = cookieValue(request, "session");
-  if (token) {
-    const tokenHash = bytesToBase64(await sha256(token));
-    return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now') AND users.active = 1")
-      .bind(tokenHash).first();
+function agentCapabilityAllows(request) {
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/$/, "") || "/";
+  const method = request.method.toUpperCase();
+  const plugin = "[a-z0-9][a-z0-9-]{2,47}";
+  const taxonomy = "[a-z0-9][a-z0-9-]{2,47}";
+  const numericId = "[1-9][0-9]*";
+
+  if (method === "GET") {
+    if ([
+      "/api/admin/entries", "/api/admin/users", "/api/admin/taxonomies",
+      "/api/admin/menus", "/api/admin/plugins", "/api/admin/media",
+      "/api/admin/plugin-schema", "/api/admin/plugin-meta", "/api/admin/blocks",
+    ].includes(path)) return true;
+    return new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}$`).test(path);
   }
+  if (method === "POST") {
+    if ([
+      "/api/admin/entries", "/api/admin/taxonomies", "/api/admin/menus",
+      "/api/admin/plugins", "/api/admin/media-agent", "/api/admin/approvals",
+    ].includes(path)) return true;
+    return new RegExp(`^/api/admin/trash/${numericId}$`).test(path)
+      || new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}$`).test(path);
+  }
+  if (method === "PATCH") {
+    return new RegExp(`^/api/admin/entries/${numericId}$`).test(path)
+      || new RegExp(`^/api/admin/users/${numericId}$`).test(path)
+      || new RegExp(`^/api/admin/plugins/${plugin}$`).test(path)
+      || /^\/api\/admin\/media\/[^/]+$/.test(path);
+  }
+  if (method === "PUT") {
+    if (["/api/admin/taxonomies", "/api/admin/menus", "/api/admin/plugin-meta"].includes(path)) return true;
+    return new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}/${numericId}$`).test(path);
+  }
+  return method === "DELETE" && new RegExp(`^/api/admin/entries/${numericId}$`).test(path);
+}
+
+async function currentSessionUser(request, env) {
+  const token = cookieValue(request, "session");
+  if (!token) return null;
+  const tokenHash = bytesToBase64(await sha256(token));
+  return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now') AND users.active = 1")
+    .bind(tokenHash).first();
+}
+
+async function currentUser(request, env) {
+  const sessionUser = await currentSessionUser(request, env);
+  if (sessionUser) return sessionUser;
   // An LSFA companion holds this opaque capability in the OS credential store.
   // Browser JavaScript and agents never receive it from CloudPress.
   const authorization = request.headers.get("Authorization") || "";
   const match = /^Bearer ([A-Za-z0-9+/=_-]{32,256})$/.exec(authorization);
-  if (!match) return null;
+  if (!match || !agentCapabilityAllows(request)) return null;
   const tokenHash = bytesToBase64(await sha256(match[1]));
   return env.DB.prepare("SELECT users.id, users.username, users.role, users.active FROM agent_capabilities JOIN users ON users.id = agent_capabilities.actor_id WHERE agent_capabilities.token_hash = ? AND agent_capabilities.revoked_at IS NULL AND agent_capabilities.expires_at > datetime('now') AND users.active = 1")
     .bind(tokenHash).first();
@@ -57,6 +98,11 @@ async function currentUser(request, env) {
 
 async function requireAdmin(request, env) {
   const user = await currentUser(request, env);
+  return user?.role === "admin" ? user : null;
+}
+
+async function requireBrowserAdmin(request, env) {
+  const user = await currentSessionUser(request, env);
   return user?.role === "admin" ? user : null;
 }
 
@@ -101,4 +147,4 @@ function sanitizeHtml(value) {
   });
 }
 
-export { base64ToBytes, bytesToBase64, cookieValue, currentUser, equalBytes, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, sanitizeHtml, sha256, takeRateLimit, validEmail };
+export { agentCapabilityAllows, base64ToBytes, bytesToBase64, cookieValue, currentSessionUser, currentUser, equalBytes, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, sanitizeHtml, sha256, takeRateLimit, validEmail };

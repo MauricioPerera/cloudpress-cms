@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const migrationPattern = /^\d{4}_.+\.sql$/;
-const ledgerSql = "CREATE TABLE IF NOT EXISTS d1_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)";
+const ledgerSql = "CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)";
 const require = createRequire(import.meta.url);
 
 export function parseArguments(args) {
@@ -15,7 +15,7 @@ export function parseArguments(args) {
     const argument = args[index];
     if (argument === "--remote") options.remote = true;
     else if (argument === "--dry-run") options.dryRun = true;
-    else if (argument === "--database" || argument === "--baseline" || argument === "--reconcile-to") {
+    else if (argument === "--database" || argument === "--baseline" || argument === "--reconcile-to" || argument === "--config") {
       const value = args[index + 1];
       if (!value || value.startsWith("--")) throw new Error(`${argument} requiere un valor.`);
       options[argument.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
@@ -59,6 +59,11 @@ export function planMigrations(migrations, applied, baseline, reconcileTo = null
 export function migrationTransaction(source, name) {
   if (!migrationPattern.test(name)) throw new Error(`Nombre de migración inválido: ${name}`);
   return `BEGIN IMMEDIATE;\n${source}\nINSERT INTO d1_migrations(name) VALUES ('${name}');\nCOMMIT;`;
+}
+
+export function nativeMigrationArgs(database, config, action = "apply") {
+  if (!database || !config || !["apply", "list"].includes(action)) throw new Error("Configuración inválida para Wrangler D1 migrations.");
+  return ["d1", "migrations", action, database, "--remote", "--config", config];
 }
 
 function executeWrangler(args) {
@@ -111,7 +116,7 @@ export async function main(args = process.argv.slice(2)) {
 
   if (options.dryRun) return { database: options.database, dryRun: true, ...plan };
   for (const name of [...plan.baseline, ...plan.reconciled]) await d1(options.database, `INSERT OR IGNORE INTO d1_migrations(name) VALUES ('${name}')`);
-  for (const name of plan.pending) await d1(options.database, migrationTransaction(await readFile(`migrations/${name}`, "utf8"), name));
+  if (plan.pending.length) await executeWrangler(nativeMigrationArgs(options.database, options.config || "wrangler.jsonc"));
   return { database: options.database, dryRun: false, baseline: plan.baseline, reconciled: plan.reconciled, applied: plan.pending };
 }
 

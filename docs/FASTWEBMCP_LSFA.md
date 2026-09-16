@@ -39,10 +39,18 @@ El input de WebMCP contiene sólo el tipo y el identificador del objetivo. No ad
 
 El companion escucha exclusivamente en `127.0.0.1:9463`. Debe permitir CORS únicamente para la URL de CloudPress configurada, responder los preflights con `Access-Control-Allow-Private-Network: true` para los navegadores que aplican Private/Local Network Access, y exponer:
 
+`Origin` y CORS no autentican procesos locales. Al vincularse, el companion genera una credencial aleatoria de canal, la guarda junto a la capacidad en el almacén seguro del sistema y la entrega una sola vez al navegador Admin. El navegador la conserva en almacenamiento del mismo origen y debe enviarla como `X-LSFA-Channel-Token` para usar el proxy del agente o solicitar aprobaciones. Un proceso que sólo falsifique `Origin` recibe `401 invalid_channel`.
+
+La frontera de confianza es el perfil del sistema operativo que ejecuta el companion y su almacén de credenciales. Un proceso que ya pueda leer ese almacén actúa con los permisos del usuario local; LSFA no pretende aislar procesos comprometidos dentro de la misma cuenta del sistema operativo.
+
 ```text
 GET  /health
 POST /v1/cloudpress/approvals
 ```
+
+Las rutas de agente están limitadas dos veces: el companion mantiene una lista explícita de métodos/rutas reversibles y CloudPress aplica la misma restricción al autenticar el bearer. Añadir un nuevo endpoint `/api/admin/*` no lo concede automáticamente al agente. Exportaciones, ajustes, privacidad de plugins y cualquier ruta desconocida quedan fuera del alcance.
+
+En **Perfil**, el administrador puede ver las capacidades emitidas y revocar cualquiera. Vincular nuevamente rota las capacidades activas de ese administrador, por lo que perder el almacenamiento local no deja accesos huérfanos indefinidamente. La vinculación inicial usa deliberadamente la sesión Admin activa más el enrolamiento LSFA previo; no vuelve a pedir PIN/TOTP. Las acciones irreversibles sí mantienen su confirmación LSFA reforzada.
 
 CloudPress primero comprueba `GET /health`. Si falla, la herramienta devuelve `failed` con `broker_unavailable` y no prepara ni ejecuta una acción.
 
