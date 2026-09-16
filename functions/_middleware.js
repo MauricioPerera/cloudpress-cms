@@ -20,6 +20,10 @@ function trustedMutationRequest(request, url) {
   if (request.headers.has("x-cloudpress-webhook-token") && url.pathname.startsWith("/api/plugins/")) return true;
   if (request.headers.has("x-cloudpress-approval-token") && url.pathname.startsWith("/api/admin/approvals/")) return true;
   if (request.headers.has("x-cloudpress-recovery-token") && url.pathname.startsWith("/api/totp-recovery/")) return true;
+  // The LSFA companion is not a browser and therefore has no Fetch Metadata
+  // headers. The route still authenticates the bearer and _shared.js enforces
+  // its exact method/path scope before returning an Admin identity.
+  if (/^Bearer [A-Za-z0-9+/=_-]{32,256}$/.test(request.headers.get("Authorization") || "") && url.pathname.startsWith("/api/admin/")) return true;
 
   const origin = request.headers.get("Origin");
   if (origin) return origin === url.origin;

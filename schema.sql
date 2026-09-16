@@ -35,8 +35,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_capabilities_actor ON agent_capabilities(ac
 -- Registro operacional de las migraciones de CloudPress aplicadas mediante
 -- scripts/d1-migrate.mjs. No almacena secretos ni estado de la aplicación.
 CREATE TABLE IF NOT EXISTS d1_migrations (
-  name TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE,
+  applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS content_items (

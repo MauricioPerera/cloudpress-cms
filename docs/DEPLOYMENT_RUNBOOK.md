@@ -49,10 +49,16 @@ npm run d1:migrate -- --database <database> --remote --baseline 0017_totp_recove
 npm run d1:migrate -- --database <database> --remote --baseline none
 ```
 
-4. En adelante, aplica sólo las no registradas. Cada migración y su fila de ledger se ejecutan dentro de una única transacción D1; si falla, no se registra ni se repite parcialmente:
+4. En adelante, aplica sólo las no registradas. El wrapper delega las migraciones pendientes a `wrangler d1 migrations apply`: Wrangler captura un respaldo, ejecuta cada archivo junto con su registro y revierte el archivo que falle. No usa `BEGIN` manual, que D1 remoto no admite:
 
 ```powershell
 npm run d1:migrate -- --database <database> --remote
+```
+
+El comando usa `wrangler.jsonc` de forma predeterminada. Si la instancia mantiene otra configuración, pásala explícitamente:
+
+```powershell
+npm run d1:migrate -- --database <database> --remote --config .\config\wrangler.production.jsonc
 ```
 
 Puedes inspeccionar el plan sin cambiar D1 con `--dry-run`; para un ledger vacío añade también el baseline que se usaría en la ejecución real.
@@ -86,4 +92,4 @@ No uses contenido o cuentas productivas para estas comprobaciones. Elimina los d
 npm test
 ```
 
-El comando debe pasar localmente y en GitHub Actions. Sus pruebas son locales y de contrato; no sustituyen la comprobación anterior contra Pages, D1 y R2 reales.
+El comando incluye el contrato del ejecutor D1 y debe pasar localmente y en GitHub Actions. Antes de usar una versión nueva del ejecutor en producción, valida además una migración pendiente contra una D1 desechable y confirma que el archivo y su ledger se aplican juntos. Las pruebas locales no sustituyen la comprobación anterior contra Pages, D1 y R2 reales.
