@@ -30,10 +30,11 @@ function governancePolicy(dataPolicy, profile) {
   const version = String(value.version ?? "cloudpress-agent-policy/v1");
   const maxEstimatedCost = Number(value.maxEstimatedCost ?? value?.budget?.maxEstimatedCost ?? profile.maxStepsPerRun);
   const verificationReserve = Number(value.verificationReserve ?? value?.budget?.verificationReserve ?? 0);
+  const maxModelCostMicrounits = Number(value.maxModelCostMicrounits ?? value?.budget?.maxModelCostMicrounits ?? 0);
   const minimumEvidence = String(value.minimumEvidence ?? "agent-attested");
   const requireCompletedDependencies = value.requireCompletedDependencies ?? true;
-  if (!/^[a-z0-9][a-z0-9._/-]{2,79}$/i.test(version) || !Number.isInteger(maxEstimatedCost) || maxEstimatedCost < 1 || maxEstimatedCost > 10000 || !Number.isInteger(verificationReserve) || verificationReserve < 0 || verificationReserve > maxEstimatedCost || evidenceRank(minimumEvidence) < 0 || typeof requireCompletedDependencies !== "boolean") return null;
-  return { version, budget: { unit: "execution-steps", maxEstimatedCost, verificationReserve }, minimumEvidence, requireCompletedDependencies };
+  if (!/^[a-z0-9][a-z0-9._/-]{2,79}$/i.test(version) || !Number.isInteger(maxEstimatedCost) || maxEstimatedCost < 1 || maxEstimatedCost > 10000 || !Number.isInteger(verificationReserve) || verificationReserve < 0 || verificationReserve > maxEstimatedCost || !Number.isInteger(maxModelCostMicrounits) || maxModelCostMicrounits < 0 || maxModelCostMicrounits > 1000000000 || evidenceRank(minimumEvidence) < 0 || typeof requireCompletedDependencies !== "boolean") return null;
+  return { version, budget: { unit: "execution-steps", maxEstimatedCost, verificationReserve, maxModelCostMicrounits }, minimumEvidence, requireCompletedDependencies };
 }
 
 function admissionInput(value, plan) {
@@ -43,6 +44,23 @@ function admissionInput(value, plan) {
   const phase = String(raw.phase ?? "implementation");
   if (!validObject(raw, 4000) || !Number.isInteger(estimatedCost) || estimatedCost < 0 || estimatedCost > 10000 || !["implementation", "verification"].includes(phase) || dependencies.length > 50 || new Set(dependencies).size !== dependencies.length || dependencies.some((id) => !/^[A-Za-z0-9-]{36}$/.test(id))) return null;
   return { estimatedCost, dependencies, phase };
+}
+
+// `dependsOn` uses one-based plan ordinals.  Requiring a dependency to point
+// backwards makes the submitted order a topological order: it is easy to
+// audit, rejects cycles before persistence, and still permits parallel roots
+// and branches.  Older plans remain sequential unless they opt in explicitly.
+function normalizePlan(value) {
+  if (!validPlan(value)) return null;
+  return value.map((step, index) => {
+    const ordinal = index + 1;
+    const preconditions = step.preconditions && typeof step.preconditions === "object" && !Array.isArray(step.preconditions) ? { ...step.preconditions } : {};
+    const rawDependencies = step.dependsOn ?? preconditions.dependsOn ?? (index ? [index] : []);
+    if (!Array.isArray(rawDependencies) || rawDependencies.length > 100) return null;
+    const dependsOn = rawDependencies.map(Number);
+    if (dependsOn.some((dependency) => !Number.isInteger(dependency) || dependency < 1 || dependency >= ordinal) || new Set(dependsOn).size !== dependsOn.length) return null;
+    return { ...step, preconditions: { ...preconditions, dependsOn } };
+  });
 }
 
 function contractSnapshot(plan) {
@@ -64,10 +82,11 @@ function profileInput(body) {
   const tools = Array.isArray(body?.tools) ? body.tools : [];
   const maxActiveRuns = Number(body?.maxActiveRuns ?? 1), maxStepsPerRun = Number(body?.maxStepsPerRun ?? 25), dataPolicy = body?.dataPolicy ?? {};
   const maximumClassification = String(dataPolicy?.maximumClassification || "");
+  const modelResidency = String(dataPolicy?.modelResidency ?? "any").trim();
   const policy = governancePolicy(dataPolicy, { maxStepsPerRun });
-  if (!PROFILE_ID.test(id) || !label || label.length > 80 || !purpose || purpose.length > 500 || !Number.isInteger(maxActiveRuns) || maxActiveRuns < 1 || maxActiveRuns > 20 || !Number.isInteger(maxStepsPerRun) || maxStepsPerRun < 1 || maxStepsPerRun > 200 || !validObject(dataPolicy, 4000) || !CLASSIFICATIONS.includes(maximumClassification) || typeof dataPolicy.allowSensitive !== "boolean" || !policy || tools.length > 100 || tools.some((tool) => !tool || !TOOL_NAME.test(String(tool.name || "")) || !RISK.has(tool.risk)) || (tools.some((tool) => tool.risk === "sensitive") && !dataPolicy.allowSensitive)) return null;
+  if (!PROFILE_ID.test(id) || !label || label.length > 80 || !purpose || purpose.length > 500 || !Number.isInteger(maxActiveRuns) || maxActiveRuns < 1 || maxActiveRuns > 20 || !Number.isInteger(maxStepsPerRun) || maxStepsPerRun < 1 || maxStepsPerRun > 200 || !validObject(dataPolicy, 4000) || !CLASSIFICATIONS.includes(maximumClassification) || !/^(any|[a-z0-9][a-z0-9._-]{1,79})$/i.test(modelResidency) || typeof dataPolicy.allowSensitive !== "boolean" || !policy || tools.length > 100 || tools.some((tool) => !tool || !TOOL_NAME.test(String(tool.name || "")) || !RISK.has(tool.risk)) || (tools.some((tool) => tool.risk === "sensitive") && !dataPolicy.allowSensitive)) return null;
   const unique = new Map(tools.map((tool) => [tool.name, tool.risk])); if (unique.size !== tools.length) return null;
-  return { id, label, purpose, maxActiveRuns, maxStepsPerRun, dataPolicy: { maximumClassification, allowSensitive: dataPolicy.allowSensitive, governance: policy }, tools };
+  return { id, label, purpose, maxActiveRuns, maxStepsPerRun, dataPolicy: { maximumClassification, allowSensitive: dataPolicy.allowSensitive, modelResidency, governance: policy }, tools };
 }
 
 async function trace(env, { traceId, taskId = null, runId = null, stepId = null, actorId = null, event, details = {} }) {
@@ -116,8 +135,9 @@ async function setProfileStatus(env, actorId, profileId, status) {
 
 async function createTask(env, actor, body) {
   const profileId = String(body?.profileId || ""), objective = String(body?.objective || "").trim();
-  const plan = body?.plan ?? [], context = body?.context ?? {}, expected = body?.expected ?? {};
-  if (!PROFILE_ID.test(profileId) || !objective || objective.length > 2000 || !validPlan(plan) || !validObject(context) || !validObject(expected)) throw new Error("Tarea de agente inválida.");
+  const requestedPlan = body?.plan ?? [], context = body?.context ?? {}, expected = body?.expected ?? {};
+  const plan = normalizePlan(requestedPlan);
+  if (!PROFILE_ID.test(profileId) || !objective || objective.length > 2000 || !plan || !validObject(context) || !validObject(expected)) throw new Error("Tarea de agente inválida.");
   const profile = await getProfile(env, profileId); if (!profile || profile.ownerId !== actor.id || profile.status !== "active") throw new Error("El perfil de agente no está disponible para este usuario.");
   const policy = governancePolicy(profile.dataPolicy, profile); if (!policy) throw new Error("La política de gobierno del perfil no es válida.");
   const admission = admissionInput(context?.admission, plan); if (!admission) throw new Error("La admisión de la tarea no es válida.");
@@ -165,7 +185,8 @@ async function taskDetail(env, id) {
   const events = await env.DB.prepare("SELECT id,run_id,step_id,actor_id,event,details_json,created_at FROM agent_trace_events WHERE task_id=? ORDER BY id DESC LIMIT 200").bind(id).all();
   const snapshots = await env.DB.prepare("SELECT run_id,policy_version,minimum_evidence,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256,created_at FROM agent_execution_snapshots WHERE task_id=? ORDER BY created_at DESC").bind(id).all();
   const inputs = await env.DB.prepare("SELECT id,run_id,step_id,field_name,prompt,classification,state,requested_at,provided_at,provided_by FROM agent_task_inputs WHERE task_id=? ORDER BY requested_at DESC").bind(id).all();
-  return { ...parse(task), admission: task.admission_json ? JSON.parse(task.admission_json) : {}, runs: hydratedRuns, snapshots: snapshots.results, inputs: inputs.results, trace: events.results.map((event) => ({ ...event, details: JSON.parse(event.details_json) })) };
+  const delegations = await env.DB.prepare("SELECT id,parent_task_id,child_task_id,parent_profile_id,child_profile_id,state,created_at,completed_at FROM agent_task_delegations WHERE parent_task_id=? OR child_task_id=? ORDER BY created_at DESC").bind(id, id).all();
+  return { ...parse(task), admission: task.admission_json ? JSON.parse(task.admission_json) : {}, runs: hydratedRuns, snapshots: snapshots.results, inputs: inputs.results, delegations: delegations.results, trace: events.results.map((event) => ({ ...event, details: JSON.parse(event.details_json) })) };
 }
 
 const taskTransitions = new Map([
@@ -208,6 +229,8 @@ async function transitionTask(env, actor, taskId, nextState, reason = "") {
   if (nextState === "completed") {
     const pending = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id).first();
     if (pending) throw new Error("No se puede completar una tarea con pasos no verificados.");
+    const delegated = await env.DB.prepare("SELECT 1 FROM agent_task_delegations WHERE parent_task_id=? AND state='active' LIMIT 1").bind(taskId).first();
+    if (delegated) throw new Error("No se puede completar una tarea con una delegación activa.");
   }
   const stamp = now(), terminal = ["completed", "failed", "cancelled"].includes(nextState);
   await env.DB.batch([
@@ -222,15 +245,21 @@ async function startStep(env, actor, taskId, ordinal) {
   if (!Number.isInteger(ordinal) || ordinal < 1 || ordinal > 200) throw new Error("Paso inválido.");
   const { task, run } = await currentTaskRun(env, taskId);
   if (task.state !== "running" || run.state !== "running") throw new Error("La tarea no está en ejecución.");
-  const step = await env.DB.prepare("SELECT id,tool_name,risk,state FROM agent_steps WHERE run_id=? AND ordinal=?").bind(run.id, ordinal).first();
+  const step = await env.DB.prepare("SELECT id,tool_name,risk,state,preconditions_json FROM agent_steps WHERE run_id=? AND ordinal=?").bind(run.id, ordinal).first();
   if (!step) throw new Error("El paso no está disponible.");
   // Re-attaching a companion after a browser reload must not consume another
   // quota unit or leave an already-running step permanently inaccessible.
   if (step.state === "running" && task.state === "running" && run.state === "running") return { id: step.id, state: "running", tool: step.tool_name, resumed: true };
   if (step.state === "waiting_approval" && step.risk === "sensitive" && task.state === "waiting_approval" && run.state === "waiting_approval") return { id: step.id, state: "waiting_approval", requiresApproval: true, resumed: true };
   if (step.state !== "planned") throw new Error("El paso no está disponible.");
-  const previous = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND ordinal<? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id, ordinal).first();
-  if (previous) throw new Error("Los pasos anteriores deben verificarse primero.");
+  let dependsOn;
+  try { dependsOn = JSON.parse(step.preconditions_json || "{}").dependsOn ?? (ordinal > 1 ? [ordinal - 1] : []); } catch { throw new Error("Las dependencias del paso no son válidas."); }
+  if (!Array.isArray(dependsOn) || dependsOn.some((dependency) => !Number.isInteger(dependency) || dependency < 1 || dependency >= ordinal)) throw new Error("Las dependencias del paso no son válidas.");
+  if (dependsOn.length) {
+    const placeholders = dependsOn.map(() => "?").join(",");
+    const unresolved = await env.DB.prepare(`SELECT ordinal FROM agent_steps WHERE run_id=? AND ordinal IN (${placeholders}) AND state NOT IN ('completed','skipped') LIMIT 1`).bind(run.id, ...dependsOn).first();
+    if (unresolved) throw new Error("Las dependencias declaradas deben verificarse primero.");
+  }
   if (step.risk === "sensitive") {
     const stamp = now();
     await env.DB.batch([
@@ -255,6 +284,11 @@ async function startStep(env, actor, taskId, ordinal) {
 async function completeRunIfVerified(env, task, run, actorId) {
   const pending = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id).first();
   if (pending) return false;
+  const delegated = await env.DB.prepare("SELECT 1 FROM agent_task_delegations WHERE parent_task_id=? AND state='active' LIMIT 1").bind(task.id).first();
+  if (delegated) {
+    await trace(env, { traceId: task.trace_id, taskId: task.id, runId: run.id, actorId, event: "task_completion_blocked", details: { reason: "active_delegation" } });
+    return false;
+  }
   const snapshot = await env.DB.prepare("SELECT minimum_evidence FROM agent_execution_snapshots WHERE run_id=?").bind(run.id).first();
   const requiredEvidence = snapshot?.minimum_evidence || "agent-attested";
   const completed = await env.DB.prepare("SELECT ordinal,verification_json FROM agent_steps WHERE run_id=? AND state='completed'").bind(run.id).all();
@@ -414,4 +448,4 @@ async function retryTask(env, actor, taskId) {
   return { id: taskId, runId, attempt: run.attempt + 1, state: "queued" };
 }
 
-export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, provideTaskInput, requestTaskInput, retryTask, setProfileStatus, startStep, taskDetail, trace, transitionTask };
+export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, normalizePlan, profileInput, provideTaskInput, requestTaskInput, retryTask, setProfileStatus, startStep, taskDetail, trace, transitionTask };

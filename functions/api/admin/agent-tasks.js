@@ -1,15 +1,15 @@
 import { json, requireAdmin } from "../../_shared.js";
 import { createProfile, createTask, failStep, finishSensitiveStep, finishStep, listProfiles, provideTaskInput, requestTaskInput, retryTask, setProfileStatus, startStep, taskDetail, transitionTask } from "../../_agent-os.js";
-import { syncAgentRuntimeTask } from "../../_agent-runtime.js";
+import { listAgentModels, syncAgentRuntimeTask, upsertAgentModel } from "../../_agent-runtime.js";
 
 const canManage = (request, env) => requireAdmin(request, env, "scheduler:manage");
 
 export async function onRequestGet({ request, env }) {
-  if (!await canManage(request, env)) return json({ error: "Se requiere permiso de operación de agentes" }, 403);
+  const admin = await canManage(request, env); if (!admin) return json({ error: "Se requiere permiso de operación de agentes" }, 403);
   const url = new URL(request.url), taskId = url.searchParams.get("taskId");
   if (taskId) { const task = await taskDetail(env, taskId); return task ? json({ task }, 200, { "Cache-Control": "no-store" }) : json({ error: "Tarea no encontrada" }, 404); }
   const tasks = await env.DB.prepare("SELECT id,trace_id,profile_id,actor_id,objective,state,created_at,started_at,completed_at,updated_at FROM agent_tasks ORDER BY updated_at DESC LIMIT 200").all();
-  return json({ profiles: await listProfiles(env), tasks: tasks.results }, 200, { "Cache-Control": "no-store" });
+  return json({ profiles: await listProfiles(env), tasks: tasks.results, models: await listAgentModels(env, admin) }, 200, { "Cache-Control": "no-store" });
 }
 
 export async function onRequestPost({ request, env }) {
@@ -17,6 +17,7 @@ export async function onRequestPost({ request, env }) {
   const body = await request.json().catch(() => null);
   try {
     if (body?.action === "create_profile") return json({ profile: await createProfile(env, admin.id, body) }, 201);
+    if (body?.action === "upsert_model") return json({ model: await upsertAgentModel(env, admin, body) });
     if (body?.action === "set_profile_status") return json({ profile: await setProfileStatus(env, admin.id, String(body.profileId || ""), String(body.status || "")) });
     if (body?.action === "create_task") return json({ task: await createTask(env, admin, body) }, 201);
     const taskId = String(body?.taskId || "");
