@@ -27,7 +27,7 @@ globalThis.fetch = async (path, init = {}) => {
 try {
   await withMockDocument(mock, async () => {
     const controller = registerCloudPressAdminTools({ broker: { async request() { return { status: "failed", operation: "cloudpress_irreversible_action", error_code: "broker_unavailable" }; } } });
-    for (const name of ["cloudpress_read_admin_state", "cloudpress_create_draft", "cloudpress_upload_media", "cloudpress_sensitive_action"]) assert.equal(mock.hasTool(name), true, `${name} debe registrarse.`);
+    for (const name of ["cloudpress_record_task_step", "cloudpress_read_admin_state", "cloudpress_create_draft", "cloudpress_upload_media", "cloudpress_sensitive_action"]) assert.equal(mock.hasTool(name), true, `${name} debe registrarse.`);
     const read = await mock.invokeTool("cloudpress_read_admin_state", { resource: "content" });
     assert.equal(read.note, "No hay contenido que coincida.");
     const draft = await mock.invokeTool("cloudpress_create_draft", { kind: "post", title: "Prueba" });

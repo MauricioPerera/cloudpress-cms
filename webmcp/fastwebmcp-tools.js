@@ -66,6 +66,20 @@ async function uploadMedia({ filename, dataUrl, metadata }) {
 
 export const reversibleTools = [
   {
+    name: "cloudpress_record_task_step",
+    title: "Registrar ejecución de tarea",
+    description: "Registra el inicio, resultado, fallo o confirmación A2F de un paso de una tarea de agente ya asignada. No ejecuta una acción de negocio y sólo funciona para la tarea y perfil de la credencial local actual. Úsala antes y después de cada herramienta incluida en el plan.",
+    inputSchema: z.object({ action: z.enum(["start_step", "finish_step", "fail_step", "finish_sensitive_step"]), taskId: z.string().uuid(), ordinal: z.number().int().positive().max(200), outcome: z.object({ result: z.record(z.string(), z.unknown()), verification: z.object({ verified: z.literal(true), check: z.string().min(1).max(500) }).passthrough() }).optional(), error: z.string().min(1).max(1000).optional(), approvalRequestId: z.string().uuid().optional() }).strict(),
+    async execute(input) {
+      if ((input.action === "finish_step" || input.action === "finish_sensitive_step") && !input.outcome) throw new Error("Indica resultado y postcondición verificada.");
+      if (input.action === "fail_step" && !input.error) throw new Error("Indica el motivo del fallo.");
+      if (input.action === "finish_sensitive_step" && !input.approvalRequestId) throw new Error("Indica la aprobación A2F aceptada.");
+      const data = await api("/api/admin/agent-execution", "POST", input);
+      visible(`Paso ${input.ordinal} registrado: ${data.step.state}.`);
+      return data.step;
+    },
+  },
+  {
     name: "cloudpress_read_admin_state",
     title: "Consultar estado de CloudPress",
     description: "Consulta contenido, usuarios, medios, taxonomías, bloques disponibles, esquema activo de plugins o metadatos antes de proponer un cambio. Devuelve el estado actual y no modifica el sitio.",
