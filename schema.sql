@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   plan_json TEXT NOT NULL DEFAULT '[]',
   context_json TEXT NOT NULL DEFAULT '{}',
   expected_json TEXT NOT NULL DEFAULT '{}',
-  state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','paused','waiting_approval','completed','failed','cancelled')),
+  admission_json TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','paused','waiting_input','waiting_approval','completed','failed','cancelled')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at TEXT,
   completed_at TEXT,
@@ -107,7 +108,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
   attempt INTEGER NOT NULL CHECK(attempt BETWEEN 1 AND 100),
-  state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','paused','waiting_approval','completed','failed','cancelled')),
+  state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','paused','waiting_input','waiting_approval','completed','failed','cancelled')),
   step_limit INTEGER NOT NULL CHECK(step_limit BETWEEN 1 AND 200),
   steps_used INTEGER NOT NULL DEFAULT 0 CHECK(steps_used >= 0),
   started_at TEXT,
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS agent_steps (
   ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 200),
   tool_name TEXT NOT NULL,
   risk TEXT NOT NULL CHECK(risk IN ('read','reversible','sensitive')),
-  state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','running','waiting_approval','completed','failed','skipped','cancelled')),
+  state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','running','waiting_input','waiting_approval','completed','failed','skipped','cancelled')),
   preconditions_json TEXT NOT NULL DEFAULT '{}',
   input_json TEXT NOT NULL DEFAULT '{}',
   expected_json TEXT NOT NULL DEFAULT '{}',
@@ -148,6 +149,39 @@ CREATE TABLE IF NOT EXISTS agent_trace_events (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_agent_trace_events_trace ON agent_trace_events(trace_id,id);
+CREATE TABLE IF NOT EXISTS agent_execution_snapshots (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL UNIQUE REFERENCES agent_runs(id) ON DELETE CASCADE,
+  policy_version TEXT NOT NULL,
+  minimum_evidence TEXT NOT NULL CHECK(minimum_evidence IN ('unverifiable','agent-attested','server-verified','approval-verified')),
+  profile_snapshot_json TEXT NOT NULL,
+  plan_snapshot_json TEXT NOT NULL,
+  policy_snapshot_json TEXT NOT NULL,
+  tool_contract_snapshot_json TEXT NOT NULL,
+  profile_sha256 TEXT NOT NULL,
+  plan_sha256 TEXT NOT NULL,
+  policy_sha256 TEXT NOT NULL,
+  tool_contract_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_execution_snapshots_task ON agent_execution_snapshots(task_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS agent_task_inputs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  step_id TEXT REFERENCES agent_steps(id) ON DELETE SET NULL,
+  field_name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  classification TEXT NOT NULL CHECK(classification IN ('public','internal','restricted')),
+  state TEXT NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting','provided','cancelled')),
+  value_json TEXT,
+  requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  provided_at TEXT,
+  provided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(run_id,field_name)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_inputs_task_state ON agent_task_inputs(task_id,state,requested_at DESC);
 
 -- Registro operacional de las migraciones de CloudPress aplicadas mediante
 -- scripts/d1-migrate.mjs. No almacena secretos ni estado de la aplicación.

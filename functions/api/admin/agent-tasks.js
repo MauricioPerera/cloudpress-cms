@@ -1,5 +1,5 @@
 import { json, requireAdmin } from "../../_shared.js";
-import { createProfile, createTask, failStep, finishSensitiveStep, finishStep, listProfiles, retryTask, setProfileStatus, startStep, taskDetail, transitionTask } from "../../_agent-os.js";
+import { createProfile, createTask, failStep, finishSensitiveStep, finishStep, listProfiles, provideTaskInput, requestTaskInput, retryTask, setProfileStatus, startStep, taskDetail, transitionTask } from "../../_agent-os.js";
 
 const canManage = (request, env) => requireAdmin(request, env, "scheduler:manage");
 
@@ -23,6 +23,8 @@ export async function onRequestPost({ request, env }) {
     if (body?.action === "finish_step") return json({ step: await finishStep(env, admin, String(body.taskId || ""), Number(body.ordinal), body.outcome) });
     if (body?.action === "fail_step") return json({ step: await failStep(env, admin, String(body.taskId || ""), Number(body.ordinal), body.error) });
     if (body?.action === "finish_sensitive_step") return json({ step: await finishSensitiveStep(env, admin, String(body.taskId || ""), Number(body.ordinal), body.approvalRequestId, body.outcome) });
+    if (body?.action === "request_task_input") return json({ input: await requestTaskInput(env, admin, String(body.taskId || ""), Number(body.ordinal), body) });
+    if (body?.action === "provide_task_input") return json({ input: await provideTaskInput(env, admin, String(body.taskId || ""), String(body.inputId || ""), body.value) });
     if (body?.action === "retry_task") return json({ task: await retryTask(env, admin, String(body.taskId || "")) });
     return json({ error: "Acción de control de agentes inválida" }, 422);
   } catch (error) { return json({ error: error.message || "No se pudo registrar la operación" }, 422); }

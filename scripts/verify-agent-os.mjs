@@ -37,6 +37,13 @@ const started = await onRequestPost({ request: request("/api/admin/agent-tasks",
 assert.equal(started.status, 200, "Una tarea en cola puede iniciar una ejecución.");
 const firstStep = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: taskInfo.task.id, ordinal: 1 }), env });
 assert.equal(firstStep.status, 200, "El primer paso se reclama en orden.");
+const requestedInput = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "request_task_input", taskId: taskInfo.task.id, ordinal: 1, fieldName: "editorial_focus", prompt: "Indica el enfoque editorial", classification: "internal" }), env });
+assert.equal(requestedInput.status, 200, "Un agente puede detenerse por información humana no sensible sin simular una aprobación A2F.");
+const inputInfo = await requestedInput.json();
+const waitingInputDetail = await taskDetail(env, taskInfo.task.id);
+assert.equal(waitingInputDetail.state, "waiting_input", "La espera de información se conserva como un estado distinto de la aprobación.");
+const providedInput = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "provide_task_input", taskId: taskInfo.task.id, inputId: inputInfo.input.id, value: "Presentar la novedad a editores" }), env });
+assert.equal(providedInput.status, 200, "El propietario puede aportar el dato humano sin usar el canal de secretos.");
 const unverified = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 1, outcome: { result: { items: 1 }, verification: { verified: false } } }), env });
 assert.equal(unverified.status, 422, "Un paso no concluye sin postcondición verificada.");
 const verified = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 1, outcome: { result: { items: 1 }, verification: { verified: true, check: "estado leído" } } }), env });
@@ -45,10 +52,18 @@ await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { actio
 const completed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 2, outcome: { result: { status: "draft" }, verification: { verified: true, check: "borrador creado" } } }), env });
 assert.equal((await completed.json()).step.taskCompleted, true, "Una tarea termina automáticamente sólo cuando todos sus pasos están verificados.");
 assert.equal((await taskDetail(env, taskInfo.task.id)).state, "completed", "La tarea persistida ya no queda en ejecución tras su último paso.");
+const governedDetail = await taskDetail(env, taskInfo.task.id);
+assert.equal(governedDetail.snapshots.length, 1, "Cada ejecución conserva una instantánea de su contrato de gobierno.");
+assert.match(governedDetail.snapshots[0].plan_sha256, /^[a-f0-9]{64}$/, "El plan inmóvil se identifica con SHA-256.");
+assert.equal(governedDetail.runs[0].steps[0].verification.evidenceLevel, "agent-attested", "La evidencia sin comprobación del servidor se clasifica explícitamente.");
 const denied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Operación no permitida", plan: [{ tool: "cloudpress_sensitive_action", risk: "sensitive" }] }), env });
 assert.equal(denied.status, 422, "Un perfil no puede planear una herramienta fuera de su contrato.");
 const classifiedDenied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Datos fuera de política", plan: [], context: { classification: "restricted" } }), env });
 assert.equal(classifiedDenied.status, 422, "Un perfil no puede recibir datos por encima de su clasificación permitida.");
+const budgetProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "budget-agent", label: "Agente con presupuesto", purpose: "Validar admisión declarativa", maxActiveRuns: 1, maxStepsPerRun: 3, dataPolicy: { maximumClassification: "public", allowSensitive: false, governance: { version: "budget/v1", maxEstimatedCost: 2, verificationReserve: 1, minimumEvidence: "server-verified", requireCompletedDependencies: true } }, tools: [] }), env });
+assert.equal(budgetProfile.status, 201, "Un perfil puede declarar una política versionada de admisión.");
+const budgetDenied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "budget-agent", objective: "Sin reserva de verificación", plan: [], context: { classification: "public", admission: { estimatedCost: 2 } } }), env });
+assert.equal(budgetDenied.status, 422, "La admisión rechaza un presupuesto sin reserva de verificación.");
 const sensitiveProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "operations-agent", label: "Agente de operaciones", purpose: "Ejecutar acciones A2F", maxActiveRuns: 1, maxStepsPerRun: 2, dataPolicy: { maximumClassification: "restricted", allowSensitive: true }, tools: [{ name: "cloudpress_sensitive_action", risk: "sensitive" }] }), env });
 assert.equal(sensitiveProfile.status, 201);
 const sensitiveTask = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "operations-agent", objective: "Purgar tras aprobación", plan: [{ tool: "cloudpress_sensitive_action", risk: "sensitive", preconditions: { approvalOperation: "purge_content" }, expected: { deleted: "content" } }], context: { classification: "restricted" } }), env });
@@ -89,4 +104,4 @@ assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_capabilities 
 const reviveRevoked = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "set_profile_status", profileId: "editor-agent", status: "active" }), env });
 assert.equal(reviveRevoked.status, 422, "Un perfil revocado no puede reactivarse silenciosamente.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "profile-lifecycle", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "pause-resume-active-step", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "profile-lifecycle", "data-policy-limit", "task-profile-limit", "admission-budget", "immutable-execution-snapshot", "evidence-classification", "waiting-input-separate-from-a2f", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "pause-resume-active-step", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));

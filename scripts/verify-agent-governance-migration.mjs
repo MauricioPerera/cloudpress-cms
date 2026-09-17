@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+
+const database = new DatabaseSync(":memory:");
+database.exec(`
+  PRAGMA foreign_keys=ON;
+  CREATE TABLE users(id INTEGER PRIMARY KEY);
+  CREATE TABLE approval_requests(id TEXT PRIMARY KEY);
+  CREATE TABLE agent_profiles(id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id));
+  CREATE TABLE agent_tasks(id TEXT PRIMARY KEY,trace_id TEXT NOT NULL UNIQUE,profile_id TEXT NOT NULL REFERENCES agent_profiles(id),actor_id INTEGER NOT NULL REFERENCES users(id),objective TEXT NOT NULL,plan_json TEXT NOT NULL DEFAULT '[]',context_json TEXT NOT NULL DEFAULT '{}',expected_json TEXT NOT NULL DEFAULT '{}',state TEXT NOT NULL CHECK(state IN ('queued','running','paused','waiting_approval','completed','failed','cancelled')),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,started_at TEXT,completed_at TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  CREATE INDEX idx_agent_tasks_profile_state ON agent_tasks(profile_id,state,updated_at DESC);
+  CREATE TABLE agent_runs(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,attempt INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('queued','running','paused','waiting_approval','completed','failed','cancelled')),step_limit INTEGER NOT NULL,steps_used INTEGER NOT NULL DEFAULT 0,started_at TEXT,completed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(task_id,attempt));
+  CREATE TABLE agent_steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,ordinal INTEGER NOT NULL,tool_name TEXT NOT NULL,risk TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('planned','running','waiting_approval','completed','failed','skipped','cancelled')),preconditions_json TEXT NOT NULL DEFAULT '{}',input_json TEXT NOT NULL DEFAULT '{}',expected_json TEXT NOT NULL DEFAULT '{}',result_json TEXT,verification_json TEXT,error_text TEXT,approval_request_id TEXT REFERENCES approval_requests(id),started_at TEXT,completed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(run_id,ordinal));
+  CREATE TABLE agent_trace_events(id INTEGER PRIMARY KEY AUTOINCREMENT,trace_id TEXT NOT NULL,task_id TEXT REFERENCES agent_tasks(id) ON DELETE CASCADE,run_id TEXT REFERENCES agent_runs(id) ON DELETE CASCADE,step_id TEXT REFERENCES agent_steps(id) ON DELETE CASCADE,actor_id INTEGER REFERENCES users(id),event TEXT NOT NULL,details_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  CREATE INDEX idx_agent_trace_events_trace ON agent_trace_events(trace_id,id);
+  INSERT INTO users(id) VALUES(1);
+  INSERT INTO agent_profiles(id,owner_id) VALUES('governance-agent',1);
+  INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,state) VALUES('00000000-0000-0000-0000-000000000001','trace','governance-agent',1,'preserve','running');
+  INSERT INTO agent_runs(id,task_id,attempt,state,step_limit) VALUES('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001',1,'running',2);
+  INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state) VALUES('00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000002',1,'cloudpress_read_admin_state','read','running');
+  INSERT INTO agent_trace_events(trace_id,task_id,run_id,step_id,event) VALUES('trace','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000003','preserved');
+`);
+database.exec(await readFile("migrations/0030_agent_governance.sql", "utf8"));
+assert.equal(database.prepare("SELECT state FROM agent_tasks").get().state, "running", "La migración conserva las tareas existentes.");
+assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_trace_events").get().total, 1, "La migración conserva la traza correlacionada.");
+database.prepare("UPDATE agent_tasks SET state='waiting_input'").run();
+database.prepare("UPDATE agent_runs SET state='waiting_input'").run();
+database.prepare("UPDATE agent_steps SET state='waiting_input'").run();
+assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0, "La reconstrucción conserva las relaciones foráneas.");
+assert.ok(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_execution_snapshots'").get(), "La migración crea instantáneas inmutables.");
+assert.ok(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_task_inputs'").get(), "La migración crea solicitudes de información humana.");
+database.close();
+console.log(JSON.stringify({ ok: true, checks: ["agent-state-rebuild", "trace-preservation", "waiting-input-check", "foreign-key-integrity", "governance-tables"] }));

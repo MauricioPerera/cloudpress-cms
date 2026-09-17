@@ -1,0 +1,18 @@
+{
+  "version": "cloudpress-agent-quality/v1",
+  "protectedPaths": [
+    "scripts/verify-agent-os.mjs",
+    "scripts/verify-agent-execution.mjs",
+    "scripts/verify-agent-contracts.mjs",
+    "scripts/verify-agent-governance-migration.mjs",
+    "scripts/verify-admin-subpage-ui.mjs",
+    "scripts/verify-http-guards.mjs",
+    "scripts/verify-agent-capability.mjs",
+    "quality/agent-quality-policy.json"
+  ],
+  "requiredChecks": [
+    { "category": "functional", "command": ["npm", "run", "test:agent-os"] },
+    { "category": "adversarial", "command": ["npm", "run", "test:http-guards"] },
+    { "category": "interface", "command": ["npm", "run", "test:admin-subpage-ui"] }
+  ]
+}

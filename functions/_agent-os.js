@@ -1,14 +1,53 @@
+import { toolContracts } from "./_agent-tool-contracts.js";
+
 const PROFILE_ID = /^[a-z][a-z0-9-]{2,47}$/;
 const TOOL_NAME = /^cloudpress_[a-z0-9_]{2,80}$/;
 const RISK = new Set(["read", "reversible", "sensitive"]);
 const CLASSIFICATIONS = ["public", "internal", "restricted"];
-const TASK_STATES = new Set(["queued", "running", "paused", "waiting_approval", "completed", "failed", "cancelled"]);
-const STEP_STATES = new Set(["planned", "running", "waiting_approval", "completed", "failed", "skipped", "cancelled"]);
+const TASK_STATES = new Set(["queued", "running", "paused", "waiting_input", "waiting_approval", "completed", "failed", "cancelled"]);
+const STEP_STATES = new Set(["planned", "running", "waiting_input", "waiting_approval", "completed", "failed", "skipped", "cancelled"]);
+const EVIDENCE_LEVELS = ["unverifiable", "agent-attested", "server-verified", "approval-verified"];
+const evidenceRank = (level) => EVIDENCE_LEVELS.indexOf(level);
 const now = () => new Date().toISOString();
 const validObject = (value, max = 12000) => value && typeof value === "object" && !Array.isArray(value) && JSON.stringify(value).length <= max;
 const validPlan = (value) => Array.isArray(value) && value.length <= 200 && value.every((item) => validObject(item, 4000));
 const parse = (row) => ({ ...row, ...(row.plan_json ? { plan: JSON.parse(row.plan_json) } : {}), ...(row.context_json ? { context: JSON.parse(row.context_json) } : {}), ...(row.expected_json ? { expected: JSON.parse(row.expected_json) } : {}), ...(row.data_policy_json ? { dataPolicy: JSON.parse(row.data_policy_json) } : {}) });
 const sensitiveTraceKey = /(?:pass(?:word)?|secret|token|authorization|cookie|pin|otp|recovery|credential|bearer|private.?key)/i;
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+async function sha256(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function governancePolicy(dataPolicy, profile) {
+  const value = dataPolicy?.governance ?? {};
+  const version = String(value.version ?? "cloudpress-agent-policy/v1");
+  const maxEstimatedCost = Number(value.maxEstimatedCost ?? value?.budget?.maxEstimatedCost ?? profile.maxStepsPerRun);
+  const verificationReserve = Number(value.verificationReserve ?? value?.budget?.verificationReserve ?? 0);
+  const minimumEvidence = String(value.minimumEvidence ?? "agent-attested");
+  const requireCompletedDependencies = value.requireCompletedDependencies ?? true;
+  if (!/^[a-z0-9][a-z0-9._/-]{2,79}$/i.test(version) || !Number.isInteger(maxEstimatedCost) || maxEstimatedCost < 1 || maxEstimatedCost > 10000 || !Number.isInteger(verificationReserve) || verificationReserve < 0 || verificationReserve > maxEstimatedCost || evidenceRank(minimumEvidence) < 0 || typeof requireCompletedDependencies !== "boolean") return null;
+  return { version, budget: { unit: "execution-steps", maxEstimatedCost, verificationReserve }, minimumEvidence, requireCompletedDependencies };
+}
+
+function admissionInput(value, plan) {
+  const raw = value ?? {};
+  const estimatedCost = Number(raw.estimatedCost ?? plan.length);
+  const dependencies = Array.isArray(raw.dependencies) ? raw.dependencies.map(String) : [];
+  const phase = String(raw.phase ?? "implementation");
+  if (!validObject(raw, 4000) || !Number.isInteger(estimatedCost) || estimatedCost < 0 || estimatedCost > 10000 || !["implementation", "verification"].includes(phase) || dependencies.length > 50 || new Set(dependencies).size !== dependencies.length || dependencies.some((id) => !/^[A-Za-z0-9-]{36}$/.test(id))) return null;
+  return { estimatedCost, dependencies, phase };
+}
+
+function contractSnapshot(plan) {
+  return plan.map((step) => ({ tool: step.tool, risk: step.risk, contracts: toolContracts.filter((contract) => contract.name === step.tool && contract.risk === step.risk).map((contract) => ({ method: contract.method, paths: contract.paths.map((path) => path.source), bodyBound: Boolean(contract.body) })) }));
+}
 
 function safeTraceValue(value, key = "", depth = 0) {
   if (sensitiveTraceKey.test(key)) return "[redacted]";
@@ -25,9 +64,10 @@ function profileInput(body) {
   const tools = Array.isArray(body?.tools) ? body.tools : [];
   const maxActiveRuns = Number(body?.maxActiveRuns ?? 1), maxStepsPerRun = Number(body?.maxStepsPerRun ?? 25), dataPolicy = body?.dataPolicy ?? {};
   const maximumClassification = String(dataPolicy?.maximumClassification || "");
-  if (!PROFILE_ID.test(id) || !label || label.length > 80 || !purpose || purpose.length > 500 || !Number.isInteger(maxActiveRuns) || maxActiveRuns < 1 || maxActiveRuns > 20 || !Number.isInteger(maxStepsPerRun) || maxStepsPerRun < 1 || maxStepsPerRun > 200 || !validObject(dataPolicy, 4000) || !CLASSIFICATIONS.includes(maximumClassification) || typeof dataPolicy.allowSensitive !== "boolean" || tools.length > 100 || tools.some((tool) => !tool || !TOOL_NAME.test(String(tool.name || "")) || !RISK.has(tool.risk)) || (tools.some((tool) => tool.risk === "sensitive") && !dataPolicy.allowSensitive)) return null;
+  const policy = governancePolicy(dataPolicy, { maxStepsPerRun });
+  if (!PROFILE_ID.test(id) || !label || label.length > 80 || !purpose || purpose.length > 500 || !Number.isInteger(maxActiveRuns) || maxActiveRuns < 1 || maxActiveRuns > 20 || !Number.isInteger(maxStepsPerRun) || maxStepsPerRun < 1 || maxStepsPerRun > 200 || !validObject(dataPolicy, 4000) || !CLASSIFICATIONS.includes(maximumClassification) || typeof dataPolicy.allowSensitive !== "boolean" || !policy || tools.length > 100 || tools.some((tool) => !tool || !TOOL_NAME.test(String(tool.name || "")) || !RISK.has(tool.risk)) || (tools.some((tool) => tool.risk === "sensitive") && !dataPolicy.allowSensitive)) return null;
   const unique = new Map(tools.map((tool) => [tool.name, tool.risk])); if (unique.size !== tools.length) return null;
-  return { id, label, purpose, maxActiveRuns, maxStepsPerRun, dataPolicy: { maximumClassification, allowSensitive: dataPolicy.allowSensitive }, tools };
+  return { id, label, purpose, maxActiveRuns, maxStepsPerRun, dataPolicy: { maximumClassification, allowSensitive: dataPolicy.allowSensitive, governance: policy }, tools };
 }
 
 async function trace(env, { traceId, taskId = null, runId = null, stepId = null, actorId = null, event, details = {} }) {
@@ -79,40 +119,59 @@ async function createTask(env, actor, body) {
   const plan = body?.plan ?? [], context = body?.context ?? {}, expected = body?.expected ?? {};
   if (!PROFILE_ID.test(profileId) || !objective || objective.length > 2000 || !validPlan(plan) || !validObject(context) || !validObject(expected)) throw new Error("Tarea de agente inválida.");
   const profile = await getProfile(env, profileId); if (!profile || profile.ownerId !== actor.id || profile.status !== "active") throw new Error("El perfil de agente no está disponible para este usuario.");
+  const policy = governancePolicy(profile.dataPolicy, profile); if (!policy) throw new Error("La política de gobierno del perfil no es válida.");
+  const admission = admissionInput(context?.admission, plan); if (!admission) throw new Error("La admisión de la tarea no es válida.");
   const classification = String(context?.classification || "");
   if (!CLASSIFICATIONS.includes(classification) || CLASSIFICATIONS.indexOf(classification) > CLASSIFICATIONS.indexOf(profile.dataPolicy.maximumClassification)) throw new Error("La clasificación de datos de la tarea excede la política del perfil.");
-  const active = await env.DB.prepare("SELECT COUNT(*) AS total FROM agent_tasks WHERE profile_id=? AND state IN ('queued','running','waiting_approval')").bind(profileId).first();
+  const active = await env.DB.prepare("SELECT COUNT(*) AS total FROM agent_tasks WHERE profile_id=? AND state IN ('queued','running','waiting_input','waiting_approval')").bind(profileId).first();
   if (Number(active?.total || 0) >= profile.max_active_runs) throw new Error("El perfil alcanzó su límite de tareas activas.");
   if (plan.length > profile.max_steps_per_run) throw new Error("El plan excede el límite de pasos del perfil.");
+  if (admission.estimatedCost + policy.budget.verificationReserve > policy.budget.maxEstimatedCost) throw new Error("El presupuesto estimado no reserva capacidad suficiente para verificar la tarea.");
+  if (admission.dependencies.includes(String(body?.taskId || ""))) throw new Error("Una tarea no puede depender de sí misma.");
+  if (policy.requireCompletedDependencies && admission.dependencies.length) {
+    const placeholders = admission.dependencies.map(() => "?").join(",");
+    const dependencies = await env.DB.prepare(`SELECT id,state,actor_id FROM agent_tasks WHERE id IN (${placeholders})`).bind(...admission.dependencies).all();
+    if (dependencies.results.length !== admission.dependencies.length || dependencies.results.some((dependency) => dependency.actor_id !== actor.id || dependency.state !== "completed")) throw new Error("Las dependencias declaradas deben estar completadas por el mismo propietario.");
+  }
+  for (const step of plan) {
+    const toolName = String(step.tool || ""), risk = String(step.risk || "read");
+    if (!TOOL_NAME.test(toolName) || !RISK.has(risk) || !profile.tools.some((tool) => tool.name === toolName && tool.risk === risk) || !toolContracts.some((contract) => contract.name === toolName && contract.risk === risk)) throw new Error("El plan solicita una herramienta no permitida por el perfil.");
+    if (risk === "sensitive" && !/^[a-z_]{3,80}$/.test(String(step?.preconditions?.approvalOperation || ""))) throw new Error("Un paso sensible debe declarar la operación irreversible aprobada.");
+  }
   const taskId = crypto.randomUUID(), runId = crypto.randomUUID(), traceId = crypto.randomUUID(), stamp = now();
+  const profileSnapshot = { id: profile.id, ownerId: profile.ownerId, label: profile.label, purpose: profile.purpose, maxActiveRuns: profile.maxActiveRuns, maxStepsPerRun: profile.maxStepsPerRun, dataPolicy: profile.dataPolicy, tools: profile.tools };
+  const contracts = contractSnapshot(plan);
+  const hashes = await Promise.all([sha256(profileSnapshot), sha256(plan), sha256(policy), sha256(contracts)]);
   const statements = [
-    env.DB.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(taskId, traceId, profileId, actor.id, objective, JSON.stringify(plan), JSON.stringify(context), JSON.stringify(expected), "queued", stamp, stamp),
+    env.DB.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,admission_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(taskId, traceId, profileId, actor.id, objective, JSON.stringify(plan), JSON.stringify(context), JSON.stringify(expected), JSON.stringify(admission), "queued", stamp, stamp),
     env.DB.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").bind(runId, taskId, 1, "queued", profile.maxStepsPerRun, stamp, stamp),
+    env.DB.prepare("INSERT INTO agent_execution_snapshots(id,task_id,run_id,policy_version,minimum_evidence,profile_snapshot_json,plan_snapshot_json,policy_snapshot_json,tool_contract_snapshot_json,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), taskId, runId, policy.version, policy.minimumEvidence, canonicalJson(profileSnapshot), canonicalJson(plan), canonicalJson(policy), canonicalJson(contracts), ...hashes, stamp),
   ];
   for (const [index, step] of plan.entries()) {
     const toolName = String(step.tool || ""), risk = String(step.risk || "read");
-    if (!TOOL_NAME.test(toolName) || !RISK.has(risk) || !profile.tools.some((tool) => tool.name === toolName && tool.risk === risk)) throw new Error("El plan solicita una herramienta no permitida por el perfil.");
-    if (risk === "sensitive" && !/^[a-z_]{3,80}$/.test(String(step?.preconditions?.approvalOperation || ""))) throw new Error("Un paso sensible debe declarar la operación irreversible aprobada.");
     statements.push(env.DB.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,preconditions_json,input_json,expected_json,created_at,updated_at) VALUES(?,?,?,?,?,'planned',?,?,?,?,?)").bind(crypto.randomUUID(), runId, index + 1, toolName, risk, JSON.stringify(step.preconditions || {}), JSON.stringify(step.input || {}), JSON.stringify(step.expected || {}), stamp, stamp));
   }
   await env.DB.batch(statements);
-  await trace(env, { traceId, taskId, runId, actorId: actor.id, event: "task_created", details: { profileId, plannedSteps: plan.length, objective } });
+  await trace(env, { traceId, taskId, runId, actorId: actor.id, event: "task_created", details: { profileId, plannedSteps: plan.length, objective, admission, policyVersion: policy.version, snapshotHashes: { profile: hashes[0], plan: hashes[1], policy: hashes[2], toolContract: hashes[3] } } });
   return { id: taskId, runId, traceId, state: "queued", profileId, objective };
 }
 
 async function taskDetail(env, id) {
-  const task = await env.DB.prepare("SELECT id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,started_at,completed_at,updated_at FROM agent_tasks WHERE id=?").bind(id).first();
+  const task = await env.DB.prepare("SELECT id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,admission_json,state,created_at,started_at,completed_at,updated_at FROM agent_tasks WHERE id=?").bind(id).first();
   if (!task) return null;
   const runs = await env.DB.prepare("SELECT id,attempt,state,step_limit,steps_used,started_at,completed_at,created_at,updated_at FROM agent_runs WHERE task_id=? ORDER BY attempt DESC").bind(id).all();
   const hydratedRuns = await Promise.all(runs.results.map(async (run) => ({ ...run, steps: (await env.DB.prepare("SELECT id,ordinal,tool_name,risk,state,preconditions_json,input_json,expected_json,result_json,verification_json,error_text,approval_request_id,started_at,completed_at,created_at,updated_at FROM agent_steps WHERE run_id=? ORDER BY ordinal").bind(run.id).all()).results.map((step) => ({ ...step, preconditions: JSON.parse(step.preconditions_json), input: JSON.parse(step.input_json), expected: JSON.parse(step.expected_json), result: step.result_json ? JSON.parse(step.result_json) : null, verification: step.verification_json ? JSON.parse(step.verification_json) : null })) })));
   const events = await env.DB.prepare("SELECT id,run_id,step_id,actor_id,event,details_json,created_at FROM agent_trace_events WHERE task_id=? ORDER BY id DESC LIMIT 200").bind(id).all();
-  return { ...parse(task), runs: hydratedRuns, trace: events.results.map((event) => ({ ...event, details: JSON.parse(event.details_json) })) };
+  const snapshots = await env.DB.prepare("SELECT run_id,policy_version,minimum_evidence,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256,created_at FROM agent_execution_snapshots WHERE task_id=? ORDER BY created_at DESC").bind(id).all();
+  const inputs = await env.DB.prepare("SELECT id,run_id,step_id,field_name,prompt,classification,state,requested_at,provided_at,provided_by FROM agent_task_inputs WHERE task_id=? ORDER BY requested_at DESC").bind(id).all();
+  return { ...parse(task), admission: task.admission_json ? JSON.parse(task.admission_json) : {}, runs: hydratedRuns, snapshots: snapshots.results, inputs: inputs.results, trace: events.results.map((event) => ({ ...event, details: JSON.parse(event.details_json) })) };
 }
 
 const taskTransitions = new Map([
   ["queued", new Set(["running", "cancelled"])],
-  ["running", new Set(["paused", "waiting_approval", "completed", "failed", "cancelled"])],
+  ["running", new Set(["paused", "waiting_input", "waiting_approval", "completed", "failed", "cancelled"])],
   ["paused", new Set(["running", "cancelled"])],
+  ["waiting_input", new Set(["running", "cancelled"])],
   ["waiting_approval", new Set(["cancelled"])],
   ["failed", new Set(["cancelled"])],
 ]);
@@ -195,6 +254,16 @@ async function startStep(env, actor, taskId, ordinal) {
 async function completeRunIfVerified(env, task, run, actorId) {
   const pending = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id).first();
   if (pending) return false;
+  const snapshot = await env.DB.prepare("SELECT minimum_evidence FROM agent_execution_snapshots WHERE run_id=?").bind(run.id).first();
+  const requiredEvidence = snapshot?.minimum_evidence || "agent-attested";
+  const completed = await env.DB.prepare("SELECT ordinal,verification_json FROM agent_steps WHERE run_id=? AND state='completed'").bind(run.id).all();
+  const weak = completed.results.find((step) => {
+    try { return evidenceRank(JSON.parse(step.verification_json || "{}").evidenceLevel || "unverifiable") < evidenceRank(requiredEvidence); } catch { return true; }
+  });
+  if (weak) {
+    await trace(env, { traceId: task.trace_id, taskId: task.id, runId: run.id, actorId, event: "task_completion_blocked", details: { reason: "insufficient_evidence", requiredEvidence, ordinal: weak.ordinal } });
+    return false;
+  }
   const stamp = now();
   await env.DB.batch([
     env.DB.prepare("UPDATE agent_runs SET state='completed',completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(stamp, stamp, run.id),
@@ -210,10 +279,58 @@ async function finishStep(env, actor, taskId, ordinal, outcome) {
   const step = await env.DB.prepare("SELECT id,tool_name,state FROM agent_steps WHERE run_id=? AND ordinal=?").bind(run.id, ordinal).first();
   if (!step || step.state !== "running") throw new Error("El paso no está en ejecución.");
   if (outcome.verification.verified !== true) throw new Error("El paso requiere una postcondición verificada.");
+  const verification = { ...outcome.verification, evidenceLevel: EVIDENCE_LEVELS.includes(outcome.verification.evidenceLevel) ? outcome.verification.evidenceLevel : "agent-attested" };
   const stamp = now();
-  await env.DB.prepare("UPDATE agent_steps SET state='completed',result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(JSON.stringify(outcome.result), JSON.stringify(outcome.verification), stamp, stamp, step.id).run();
-  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "step_verified", details: { ordinal, tool: step.tool_name, verification: outcome.verification } });
+  await env.DB.prepare("UPDATE agent_steps SET state='completed',result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(JSON.stringify(outcome.result), JSON.stringify(verification), stamp, stamp, step.id).run();
+  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "step_verified", details: { ordinal, tool: step.tool_name, verification } });
   return { id: step.id, state: "completed", verified: true, taskCompleted: await completeRunIfVerified(env, task, run, actor.id) };
+}
+
+function validHumanInput(value) {
+  return (typeof value === "string" && value.length <= 4000) || value === null || typeof value === "number" || typeof value === "boolean" || (value && typeof value === "object" && JSON.stringify(value).length <= 4000);
+}
+
+async function requestTaskInput(env, actor, taskId, ordinal, body) {
+  const fieldName = String(body?.fieldName || "").trim(), prompt = String(body?.prompt || "").trim(), classification = String(body?.classification || "public");
+  if (!/^[a-z][a-z0-9_]{1,63}$/.test(fieldName) || !prompt || prompt.length > 500 || !["public", "internal"].includes(classification)) throw new Error("La solicitud de información humana no sensible no es válida.");
+  const { task, run } = await currentTaskRun(env, taskId);
+  if (task.state !== "running" || run.state !== "running") throw new Error("La tarea no está en ejecución.");
+  const step = await env.DB.prepare("SELECT id,state FROM agent_steps WHERE run_id=? AND ordinal=?").bind(run.id, ordinal).first();
+  if (!step || step.state !== "running") throw new Error("El paso no está en ejecución.");
+  const profile = await getProfile(env, task.profile_id);
+  if (!profile || CLASSIFICATIONS.indexOf(classification) > CLASSIFICATIONS.indexOf(profile.dataPolicy.maximumClassification)) throw new Error("La clasificación solicitada excede la política del perfil.");
+  const stamp = now(), inputId = crypto.randomUUID();
+  try {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO agent_task_inputs(id,task_id,run_id,step_id,field_name,prompt,classification,state,requested_at) VALUES(?,?,?,?,?,?,?,'waiting',?)").bind(inputId, taskId, run.id, step.id, fieldName, prompt, classification, stamp),
+      env.DB.prepare("UPDATE agent_steps SET state='waiting_input',updated_at=? WHERE id=? AND state='running'").bind(stamp, step.id),
+      env.DB.prepare("UPDATE agent_runs SET state='waiting_input',updated_at=? WHERE id=? AND state='running'").bind(stamp, run.id),
+      env.DB.prepare("UPDATE agent_tasks SET state='waiting_input',updated_at=? WHERE id=? AND state='running'").bind(stamp, taskId),
+    ]);
+  } catch { throw new Error("Ya existe una solicitud pendiente con ese identificador de campo."); }
+  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "task_waiting_input", details: { ordinal, fieldName, prompt, classification } });
+  return { id: inputId, state: "waiting_input", fieldName, classification };
+}
+
+async function provideTaskInput(env, actor, taskId, inputId, value) {
+  if (!/^[A-Za-z0-9-]{36}$/.test(String(inputId || "")) || !validHumanInput(value)) throw new Error("La respuesta humana no sensible no es válida.");
+  const { task, run } = await currentTaskRun(env, taskId);
+  if (task.actor_id !== actor.id || task.state !== "waiting_input" || run.state !== "waiting_input") throw new Error("La tarea no está esperando información humana.");
+  const input = await env.DB.prepare("SELECT id,step_id,field_name,state FROM agent_task_inputs WHERE id=? AND task_id=? AND run_id=?").bind(inputId, taskId, run.id).first();
+  if (!input || input.state !== "waiting") throw new Error("La solicitud de información no está disponible.");
+  const step = await env.DB.prepare("SELECT input_json FROM agent_steps WHERE id=? AND run_id=? AND state='waiting_input'").bind(input.step_id, run.id).first();
+  if (!step) throw new Error("El paso asociado no está esperando información humana.");
+  let stepInput = {}; try { stepInput = JSON.parse(step.input_json || "{}"); } catch { throw new Error("La entrada del paso no es válida."); }
+  stepInput.humanInput = { ...(stepInput.humanInput || {}), [input.field_name]: value };
+  const stamp = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE agent_task_inputs SET state='provided',value_json=?,provided_at=?,provided_by=? WHERE id=? AND state='waiting'").bind(JSON.stringify(value), stamp, actor.id, input.id),
+    env.DB.prepare("UPDATE agent_steps SET state='running',input_json=?,updated_at=? WHERE id=? AND state='waiting_input'").bind(JSON.stringify(stepInput), stamp, input.step_id),
+    env.DB.prepare("UPDATE agent_runs SET state='running',updated_at=? WHERE id=? AND state='waiting_input'").bind(stamp, run.id),
+    env.DB.prepare("UPDATE agent_tasks SET state='running',updated_at=? WHERE id=? AND state='waiting_input'").bind(stamp, taskId),
+  ]);
+  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: input.step_id, actorId: actor.id, event: "task_input_provided", details: { fieldName: input.field_name, inputId: input.id, classification: "non-secret" } });
+  return { id: input.id, state: "provided", taskState: "running" };
 }
 
 async function failStep(env, actor, taskId, ordinal, errorText) {
@@ -267,7 +384,7 @@ async function finishSensitiveStep(env, actor, taskId, ordinal, approvalRequestI
   const stamp = now();
   const claimed = await env.DB.prepare("UPDATE agent_runs SET steps_used=steps_used+1,state='running',updated_at=? WHERE id=? AND state='waiting_approval' AND steps_used<step_limit").bind(stamp, run.id).run();
   if (!claimed.meta?.changes) throw new Error("La ejecución alcanzó su límite de pasos.");
-  const verification = { ...outcome.verification, verified: true, source: "server-approved-action", evidence: { type: "approval_execution", approvalRequestId, operation: payload.operation } };
+  const verification = { ...outcome.verification, verified: true, source: "server-approved-action", evidenceLevel: "approval-verified", evidence: { type: "approval_execution", approvalRequestId, operation: payload.operation } };
   await env.DB.batch([
     env.DB.prepare("UPDATE agent_steps SET state='completed',approval_request_id=?,result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='waiting_approval'").bind(approvalRequestId, JSON.stringify(approvedResult), JSON.stringify(verification), stamp, stamp, step.id),
     env.DB.prepare("UPDATE agent_tasks SET state='running',updated_at=? WHERE id=? AND state='waiting_approval'").bind(stamp, taskId),
@@ -283,14 +400,16 @@ async function retryTask(env, actor, taskId) {
   if (!profile || profile.status !== "active") throw new Error("El perfil de agente no está disponible.");
   if (run.attempt >= 100) throw new Error("La tarea alcanzó el límite de reintentos.");
   const plan = JSON.parse(task.plan_json), runId = crypto.randomUUID(), stamp = now();
+  const previousSnapshot = await env.DB.prepare("SELECT policy_version,minimum_evidence,profile_snapshot_json,plan_snapshot_json,policy_snapshot_json,tool_contract_snapshot_json,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256 FROM agent_execution_snapshots WHERE run_id=?").bind(run.id).first();
   const statements = [
     env.DB.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").bind(runId, taskId, run.attempt + 1, "queued", profile.maxStepsPerRun, stamp, stamp),
     env.DB.prepare("UPDATE agent_tasks SET state='queued',completed_at=NULL,updated_at=? WHERE id=? AND state='failed'").bind(stamp, taskId),
   ];
+  if (previousSnapshot) statements.push(env.DB.prepare("INSERT INTO agent_execution_snapshots(id,task_id,run_id,policy_version,minimum_evidence,profile_snapshot_json,plan_snapshot_json,policy_snapshot_json,tool_contract_snapshot_json,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), taskId, runId, previousSnapshot.policy_version, previousSnapshot.minimum_evidence, previousSnapshot.profile_snapshot_json, previousSnapshot.plan_snapshot_json, previousSnapshot.policy_snapshot_json, previousSnapshot.tool_contract_snapshot_json, previousSnapshot.profile_sha256, previousSnapshot.plan_sha256, previousSnapshot.policy_sha256, previousSnapshot.tool_contract_sha256, stamp));
   for (const [index, step] of plan.entries()) statements.push(env.DB.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,preconditions_json,input_json,expected_json,created_at,updated_at) VALUES(?,?,?,?,?,'planned',?,?,?,?,?)").bind(crypto.randomUUID(), runId, index + 1, step.tool, step.risk, JSON.stringify(step.preconditions || {}), JSON.stringify(step.input || {}), JSON.stringify(step.expected || {}), stamp, stamp));
   await env.DB.batch(statements);
   await trace(env, { traceId: task.trace_id, taskId, runId, actorId: actor.id, event: "task_retried", details: { fromAttempt: run.attempt, toAttempt: run.attempt + 1 } });
   return { id: taskId, runId, attempt: run.attempt + 1, state: "queued" };
 }
 
-export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, retryTask, setProfileStatus, startStep, taskDetail, trace, transitionTask };
+export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, provideTaskInput, requestTaskInput, retryTask, setProfileStatus, startStep, taskDetail, trace, transitionTask };
