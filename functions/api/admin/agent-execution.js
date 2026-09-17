@@ -1,5 +1,5 @@
 import { currentAgentCapabilityUser, json } from "../../_shared.js";
-import { failStep, finishStep, startStep } from "../../_agent-os.js";
+import { failStep, finishSensitiveStep, finishStep, startStep } from "../../_agent-os.js";
 
 async function ownedTask(env, agent, taskId) {
   const task = await env.DB.prepare("SELECT id FROM agent_tasks WHERE id=? AND actor_id=? AND profile_id=?").bind(taskId, agent.id, agent.agent_profile_id).first();
@@ -38,6 +38,7 @@ export async function onRequestPost({ request, env }) {
     await ownedTask(env, agent, taskId);
     if (body?.action === "start_step") return json({ step: await startStep(env, agent, taskId, Number(body.ordinal)) });
     if (body?.action === "finish_step") return json({ step: await finishStep(env, agent, taskId, Number(body.ordinal), await verifiedOutcome(env, agent, taskId, Number(body.ordinal), body.outcome)) });
+    if (body?.action === "finish_sensitive_step") return json({ step: await finishSensitiveStep(env, agent, taskId, Number(body.ordinal), body.approvalRequestId, body.outcome) });
     if (body?.action === "fail_step") return json({ step: await failStep(env, agent, taskId, Number(body.ordinal), body.error) });
     return json({ error: "Acción de ejecución de agente inválida." }, 422);
   } catch (error) { return json({ error: error.message || "No se pudo registrar el paso." }, 422); }
