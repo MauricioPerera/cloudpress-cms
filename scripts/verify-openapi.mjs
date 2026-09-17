@@ -17,7 +17,9 @@ assert.equal(document.paths["/api/admin/content"].post["x-cloudpress-agent-acces
 assert.deepEqual(document.paths["/api/admin/agent-runtime"].post.security, [{ agentCapability: [] }], "El runtime documenta la capacidad revocable, no una cookie administrativa.");
 assert.equal(document.paths["/api/admin/agent-runtime"].post["x-cloudpress-agent-access"], "capability-runtime");
 assert.equal(document.paths["/api/admin/agent-runtime"].post.requestBody.content["application/json"].schema.$ref, "#/components/schemas/AgentRuntimeRequest", "El runtime debe publicar sus operaciones, no un objeto sin contrato.");
-assert.equal(document.components.schemas.AgentRuntimeRequest.oneOf.length, 10, "El contrato cubre cada acción del runtime.");
+assert.equal(document.components.schemas.AgentRuntimeRequest.oneOf.length, 11, "El contrato cubre cada acción del runtime.");
+const invoke = document.components.schemas.AgentRuntimeRequest.oneOf.find((item) => item.properties?.action?.const === "invoke_model");
+assert.ok(invoke?.required.includes("prompt"), "La inferencia exige prompt explícitamente en el contrato.");
 assert.equal(document.paths["/api/admin/agent-observability"].get.responses["200"].content["application/json"].schema.$ref, "#/components/schemas/AgentObservability", "La observabilidad debe tener un contrato consultable.");
 assert.equal(document.paths["/api/admin/roles"].get["x-cloudpress-agent-access"], "none");
 assert.equal(document.paths["/api/admin/export"].get["x-cloudpress-agent-access"], "none");

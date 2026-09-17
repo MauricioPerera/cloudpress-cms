@@ -9501,10 +9501,46 @@
             ],
             "properties": {
               "action": {
-                "enum": [
-                  "route_model",
-                  "invoke_model"
-                ]
+                "const": "route_model"
+              },
+              "jobId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "leaseId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "modelId": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "estimatedInputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000000
+              },
+              "estimatedOutputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000000
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "action",
+              "jobId",
+              "leaseId",
+              "estimatedInputTokens",
+              "estimatedOutputTokens",
+              "prompt"
+            ],
+            "properties": {
+              "action": {
+                "const": "invoke_model"
               },
               "jobId": {
                 "type": "string",
@@ -9531,8 +9567,7 @@
               "prompt": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 16000,
-                "description": "Requerido únicamente por invoke_model."
+                "maxLength": 16000
               }
             },
             "additionalProperties": false
