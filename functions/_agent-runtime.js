@@ -3,6 +3,10 @@ import { createTask, getProfile, trace } from "./_agent-os.js";
 const TASK_ID = /^[A-Za-z0-9-]{36}$/;
 const CLASSIFICATIONS = ["public", "internal", "restricted"];
 const PROVIDERS = new Set(["external-webmcp", "cloudflare-workers-ai"]);
+// Workers AI does not support Cloudflare Regional Services.  A geographic
+// label here would make the catalog claim a residency guarantee the provider
+// cannot enforce.  See Cloudflare Data Localization product compatibility.
+const CLOUDFLARE_AI_RESIDENCY = "cloudflare-managed";
 const now = () => new Date().toISOString();
 const sensitiveKey = /(?:pass(?:word)?|secret|token|authorization|cookie|pin|otp|recovery|credential|bearer|private.?key)/i;
 
@@ -153,6 +157,7 @@ function modelInput(body) {
 }
 
 export async function upsertAgentModel(env, actor, body) {
+  if (String(body?.providerId || "") === "cloudflare-workers-ai" && String(body?.dataResidency || "") !== CLOUDFLARE_AI_RESIDENCY) throw new Error("Workers AI no permite fijar residencia regional; usa cloudflare-managed o selecciona un proveedor que garantice la región requerida.");
   const model = modelInput(body); if (!model) throw new Error("Modelo de agente inválido.");
   const stamp = now(), id = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO agent_model_catalog(id,owner_id,provider_id,model_id,label,data_residency,max_input_tokens,max_output_tokens,input_cost_microunits,output_cost_microunits,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_id,provider_id,model_id) DO UPDATE SET label=excluded.label,data_residency=excluded.data_residency,max_input_tokens=excluded.max_input_tokens,max_output_tokens=excluded.max_output_tokens,input_cost_microunits=excluded.input_cost_microunits,output_cost_microunits=excluded.output_cost_microunits,status=excluded.status,updated_at=excluded.updated_at").bind(id, actor.id, model.providerId, model.modelId, model.label, model.dataResidency, model.maxInputTokens, model.maxOutputTokens, model.inputCostMicrounits, model.outputCostMicrounits, model.status, stamp, stamp).run();
