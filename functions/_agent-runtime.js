@@ -128,10 +128,18 @@ export async function recordAgentModelUsage(env, agent, jobId, leaseId, usage) {
   if (!validObject(usage, 2000) || !PROVIDERS.has(String(usage.providerId || "")) || !/^[A-Za-z0-9@._/-]{1,120}$/.test(String(usage.modelId || ""))) throw new Error("Uso de modelo inválido.");
   const inputTokens = Number(usage.inputTokens || 0), outputTokens = Number(usage.outputTokens || 0), costMicrounits = Number(usage.costMicrounits || 0);
   if (![inputTokens, outputTokens, costMicrounits].every((value) => Number.isInteger(value) && value >= 0 && value <= 100000000)) throw new Error("Métricas de uso inválidas.");
-  const job = await leasedJob(env, agent, jobId, leaseId), stamp = now();
-  const catalog = await env.DB.prepare("SELECT id,input_cost_microunits,output_cost_microunits FROM agent_model_catalog WHERE owner_id=? AND provider_id=? AND model_id=? AND status='enabled'").bind(agent.id, usage.providerId, usage.modelId).first();
-  const serverCost = catalog ? inputTokens * Number(catalog.input_cost_microunits) + outputTokens * Number(catalog.output_cost_microunits) : costMicrounits;
-  const evidenceLevel = catalog ? "server-verified" : "agent-attested";
+  const job = await leasedJob(env, agent, jobId, leaseId), profile = await ownedActiveProfile(env, agent), stamp = now();
+  const catalog = await env.DB.prepare("SELECT id,data_residency,max_input_tokens,max_output_tokens,input_cost_microunits,output_cost_microunits FROM agent_model_catalog WHERE owner_id=? AND provider_id=? AND model_id=? AND status='enabled'").bind(agent.id, usage.providerId, usage.modelId).first();
+  // A runner may report the measured values, but it may not invent an uncatalogued
+  // provider/model pair or bypass the profile's routing constraints.
+  if (!catalog) throw new Error("El uso corresponde a un modelo no catalogado o deshabilitado.");
+  const residency = String(profile.dataPolicy?.modelResidency || "any");
+  if ((residency !== "any" && catalog.data_residency !== residency) || inputTokens > Number(catalog.max_input_tokens) || outputTokens > Number(catalog.max_output_tokens)) throw new Error("El uso del modelo excede la política de residencia o tokens.");
+  const serverCost = inputTokens * Number(catalog.input_cost_microunits) + outputTokens * Number(catalog.output_cost_microunits);
+  const budget = Number(profile.dataPolicy?.governance?.budget?.maxModelCostMicrounits ?? 0);
+  const spent = Number((await env.DB.prepare("SELECT COALESCE(SUM(cost_microunits),0) AS total FROM agent_model_usage WHERE run_id=?").bind(job.run_id).first("total")) || 0);
+  if (spent + serverCost > budget) throw new Error("El uso del modelo excede el presupuesto de la ejecución.");
+  const evidenceLevel = "server-verified";
   await env.DB.prepare("INSERT INTO agent_model_usage(id,task_id,run_id,model_catalog_id,provider_id,model_id,input_tokens,output_tokens,cost_microunits,evidence_level,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), job.task_id, job.run_id, catalog?.id || null, usage.providerId, usage.modelId, inputTokens, outputTokens, serverCost, evidenceLevel, stamp).run();
   await runtimeTrace(env, job, "model_usage_recorded", { provider: usage.providerId, model: usage.modelId, inputTokens, outputTokens, costMicrounits: serverCost, evidenceLevel });
   return { recorded: true, costMicrounits: serverCost, evidenceLevel };

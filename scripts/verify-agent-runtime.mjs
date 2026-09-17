@@ -47,6 +47,7 @@ assert.equal(inference.usage.costMicrounits, 7, "El coste de inferencia se calcu
 await assert.rejects(() => routeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "browser-agent", estimatedInputTokens: 20, estimatedOutputTokens: 20 }), /presupuesto/, "El router reserva el coste ya consumido por la ejecución antes de permitir otra inferencia.");
 const modelUsage = await recordAgentModelUsage(env, agent, jobId, assignment.job.leaseId, { providerId: "external-webmcp", modelId: "browser-agent", inputTokens: 12, outputTokens: 8, costMicrounits: 0 });
 assert.equal(modelUsage.evidenceLevel, "server-verified", "Un modelo catalogado calcula coste verificable en servidor.");
+await assert.rejects(() => recordAgentModelUsage(env, agent, jobId, assignment.job.leaseId, { providerId: "external-webmcp", modelId: "modelo-inventado", inputTokens: 1, outputTokens: 1, costMicrounits: 0 }), /no catalogado/, "El runner no puede falsear observabilidad con modelos fuera del catálogo.");
 assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_model_usage WHERE run_id=?").get(runId).total, 2, "El uso atestado y la inferencia verificada quedan correlacionados a la ejecución.");
 const memory = await writeEpisodicMemory(env, agent, jobId, assignment.job.leaseId, { classification: "internal", summary: { fact: "estado preparado" }, provenance: { source: "runtime-test" } });
 assert.match(memory.payloadSha256, /^[a-f0-9]{64}$/, "La memoria conserva un hash de procedencia.");
