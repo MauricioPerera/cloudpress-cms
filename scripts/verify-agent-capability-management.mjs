@@ -19,6 +19,11 @@ const DB = {
   async batch(statements) { return Promise.all(statements.map((statement) => statement.run())); },
 };
 await database.prepare("INSERT INTO users(username,password_hash,password_salt,role) VALUES(?,?,?,?)").run("admin", "hash", "salt", "admin");
+await database.prepare("INSERT INTO agent_profiles(id,owner_id,label,purpose,status,max_active_runs,max_steps_per_run,data_policy_json) VALUES(?,?,?,?,?,?,?,?)").run("editor-agent", 1, "Editor", "Borradores", "active", 1, 5, JSON.stringify({ maximumClassification: "internal", allowSensitive: false }));
+await database.prepare("INSERT INTO agent_profile_tools(profile_id,tool_name,risk) VALUES(?,?,?)").run("editor-agent", "cloudpress_read_admin_state", "read");
+await database.prepare("INSERT INTO agent_profile_tools(profile_id,tool_name,risk) VALUES(?,?,?)").run("editor-agent", "cloudpress_create_draft", "reversible");
+await database.prepare("INSERT INTO agent_profile_tools(profile_id,tool_name,risk) VALUES(?,?,?)").run("editor-agent", "cloudpress_update_content", "reversible");
+await database.prepare("INSERT INTO agent_profile_tools(profile_id,tool_name,risk) VALUES(?,?,?)").run("editor-agent", "cloudpress_restore_content", "reversible");
 const session = "session-qa-000000000000000000000000000001";
 const sessionHash = bytesToBase64(await sha256(session));
 await database.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,?)").run(1, sessionHash, new Date(Date.now() + 60_000).toISOString());
@@ -29,7 +34,7 @@ const cookie = { Cookie: `session=${session}` };
 const bearerDenied = await issue({ request: new Request("https://cms.example/api/admin/agent-capability", { method: "POST", headers: { Authorization: `Bearer ${"A".repeat(44)}` } }), env });
 assert.equal(bearerDenied.status, 403, "Una capacidad no puede emitir otras capacidades.");
 
-const issuedResponse = await issue({ request: new Request("https://cms.example/api/admin/agent-capability", { method: "POST", headers: cookie }), env });
+const issuedResponse = await issue({ request: new Request("https://cms.example/api/admin/agent-capability", { method: "POST", headers: { ...cookie, "content-type": "application/json" }, body: JSON.stringify({ profileId: "editor-agent" }) }), env });
 assert.equal(issuedResponse.status, 201);
 const issued = await issuedResponse.json();
 assert.match(issued.token, /^[A-Za-z0-9+/=]{40,}$/);
@@ -47,22 +52,25 @@ assert.ok(database.prepare("SELECT revoked_at FROM agent_capabilities WHERE id=?
 
 const raw = "J2P8KtCwXdeJY9Jca4dA6qHUlN5SgB1m0qVw7eRz3hQ=";
 const hash = bytesToBase64(await sha256(raw));
-await database.prepare("INSERT INTO agent_capabilities(id,actor_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?)").run("scoped-capability", 1, hash, new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
+await database.prepare("INSERT INTO agent_capabilities(id,actor_id,profile_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)").run("scoped-capability", 1, "editor-agent", hash, new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
 const auth = { Authorization: `Bearer ${raw}` };
 assert.equal((await currentUser(new Request("https://cms.example/api/admin/users", { headers: auth }), env))?.id, 1);
-assert.equal((await currentUser(new Request("https://cms.example/api/admin/content", { headers: auth }), env))?.id, 1, "La capacidad debe leer el endpoint editorial moderno.");
-assert.equal((await currentUser(new Request("https://cms.example/api/admin/content", { method: "POST", headers: auth }), env))?.id, 1, "La capacidad debe crear contenido en el endpoint editorial moderno.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/content", { headers: auth }), env), null, "Un perfil no hereda endpoints editoriales fuera de sus contratos.");
+assert.equal((await currentUser(new Request("https://cms.example/api/admin/entries", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ status: "draft" }) }), env))?.id, 1, "El perfil editorial puede crear exclusivamente borradores.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/entries", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ status: "published" }) }), env), null, "La capacidad no puede publicar por un endpoint compartido.");
 assert.equal((await currentUser(new Request("https://cms.example/api/admin/content/2", { method: "PATCH", headers: auth }), env))?.id, 1, "La capacidad debe editar contenido en el endpoint editorial moderno.");
-assert.equal((await currentUser(new Request("https://cms.example/api/admin/content-types", { headers: auth }), env))?.id, 1, "La capacidad puede descubrir tipos, sin poder mutarlos.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/content-types", { headers: auth }), env), null, "La capacidad no hereda descubrimiento de contratos no declarados por una herramienta.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/content-types", { method: "POST", headers: auth }), env), null, "La capacidad no puede redefinir contratos de contenido.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/users/2", { method: "PATCH", headers: auth }), env), null, "Una capacidad no debe poder cambiar roles ni contraseñas de usuarios.");
-const activeUser = await currentUser(new Request("https://cms.example/api/admin/users/2/active", { method: "POST", headers: auth }), env);
-assert.equal(activeUser?.id, 1, "El cambio acotado de estado de usuario debe permanecer permitido.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/users/2/active", { method: "POST", headers: auth }), env), null, "El perfil no recibe herramientas que no fueron concedidas.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/export", { headers: auth }), env), null, "La capacidad no debe leer exportaciones administrativas.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/settings", { headers: auth }), env), null, "La capacidad no debe heredar futuros GET administrativos.");
 assert.equal((await currentUser(new Request("https://cms.example/api/admin/trash/7", { method: "POST", headers: auth }), env))?.id, 1, "Restaurar desde Papelera debe permanecer permitido.");
-const companionMutation = await middleware({ request: new Request("https://cms.example/api/admin/entries", { method: "POST", headers: auth }), env, next: async () => new Response(null, { status: 204 }) });
+const companionMutation = await middleware({ request: new Request("https://cms.example/api/admin/entries", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ status: "draft" }) }), env, next: async () => new Response(null, { status: 204 }) });
 assert.equal(companionMutation.status, 204, "El middleware debe aceptar al companion no-browser y dejar la autorización final a la ruta.");
+const accessUi = await readFile("agent-access.js", "utf8");
+assert.match(accessUi, /cloudpress-agent-profile/, "La vinculación debe pedir un perfil concreto.");
+assert.match(accessUi, /profileId: profileSelect\.value/, "La vinculación debe emitir una capacidad ligada al perfil seleccionado.");
 
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "single-active-rotation", "safe-listing", "operational-revocation", "identity-mutation-denied", "modern-content-scope", "server-side-scope", "non-browser-companion"] }));
+console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "profile-bound-issuance-ui", "single-active-rotation", "safe-listing", "operational-revocation", "identity-mutation-denied", "modern-content-scope", "server-side-scope", "non-browser-companion"] }));

@@ -13,6 +13,7 @@
     "test:http-guards": "node scripts/verify-http-guards.mjs",
     "test:approvals": "node scripts/verify-approvals.mjs",
     "test:agent-capability": "node scripts/verify-agent-capability.mjs && node scripts/verify-agent-capability-management.mjs",
+    "test:agent-os": "node scripts/verify-agent-os.mjs && node scripts/verify-agent-contracts.mjs",
     "test:password-hardening": "node scripts/verify-password-hardening.mjs",
     "test:totp": "node scripts/verify-totp.mjs",
     "test:totp-recovery": "node scripts/verify-totp-recovery.mjs",
@@ -31,7 +32,7 @@
     "test:admin-ui-confirmation-flow": "node scripts/verify-admin-ui-confirmation-flow.mjs",
     "test:schema": "node scripts/verify-schema-contract.mjs",
     "test:syntax": "node scripts/check-syntax.mjs",
-    "test": "npm run webmcp:build && npm run plugins:build && npm run openapi:build && npm run plugins:validate && npm run test:plugin-host && npm run test:public-plugin-api && npm run test:plugin-admin-ui && npm run test:plugin-boundaries && npm run test:openapi && npm run test:api-errors && npm run test:admin-ui-confirmation-flow && npm run test:http-guards && npm run test:approvals && npm run test:agent-capability && npm run test:roles && npm run test:core-content-types && npm run test:admin-subpage-ui && npm run test:password-hardening && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:scheduler && npm run test:d1-migrate && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
+    "test": "npm run webmcp:build && npm run plugins:build && npm run openapi:build && npm run plugins:validate && npm run test:plugin-host && npm run test:public-plugin-api && npm run test:plugin-admin-ui && npm run test:plugin-boundaries && npm run test:openapi && npm run test:api-errors && npm run test:admin-ui-confirmation-flow && npm run test:http-guards && npm run test:approvals && npm run test:agent-capability && npm run test:agent-os && npm run test:roles && npm run test:core-content-types && npm run test:admin-subpage-ui && npm run test:password-hardening && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:scheduler && npm run test:d1-migrate && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
   },
   "devDependencies": {
     "acorn": "^8.18.0",

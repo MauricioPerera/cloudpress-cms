@@ -90,9 +90,9 @@ export const reversibleTools = [
     name: "cloudpress_create_draft",
     title: "Crear borrador",
     description: "Crea como borrador una entrada, página o tipo de contenido declarado por un plugin. Úsala para preparar contenido sin publicarlo; el usuario lo revisa y publica manualmente.",
-    inputSchema: z.object({ kind: z.enum(["post", "page"]), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional() }).strict(),
-    async execute({ kind, contentType, title, slug, excerpt, body, blocks, termIds, pluginTermIds }) {
-      const data = await api("/api/admin/entries", "POST", { kind, contentType, title, slug, excerpt, body, blocks, termIds, pluginTermIds, status: "draft" });
+    inputSchema: z.object({ kind: z.enum(["post", "page"]), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional(), advancedFields: z.record(z.string().max(128), z.unknown()).refine((value) => Object.keys(value).length <= 100, "Máximo 100 metadatos avanzados.").optional() }).strict(),
+    async execute({ kind, contentType, title, slug, excerpt, body, blocks, termIds, pluginTermIds, advancedFields }) {
+      const data = await api("/api/admin/entries", "POST", { kind, contentType, title, slug, excerpt, body, blocks, termIds, pluginTermIds, advancedFields, status: "draft" });
       visible(`Borrador creado: ${title}.`); return { id: data.id, status: "draft", title };
     },
   },
@@ -100,7 +100,7 @@ export const reversibleTools = [
     name: "cloudpress_update_content",
     title: "Actualizar contenido",
     description: "Actualiza cualquier entrada, página o tipo de contenido activo y conserva una revisión previa. Con status publicado y publishedAt futuro, programa la publicación. Úsala para correcciones que puedan revertirse desde CloudPress.",
-    inputSchema: z.object({ id: z.number().int().positive(), kind: z.enum(["post", "page"]).optional(), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180).optional(), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), status: z.enum(["draft", "published"]).optional(), publishedAt: z.string().datetime({ offset: true }).nullable().optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional() }).strict(),
+    inputSchema: z.object({ id: z.number().int().positive(), kind: z.enum(["post", "page"]).optional(), contentType: z.string().max(48).optional(), title: z.string().min(1).max(180).optional(), slug: z.string().max(96).optional(), excerpt: z.string().max(500).optional(), body: z.string().max(50000).optional(), blocks: blockDocument.optional(), status: z.enum(["draft", "published"]).optional(), publishedAt: z.string().datetime({ offset: true }).nullable().optional(), termIds: z.array(z.number().int().positive()).max(100).optional(), pluginTermIds: z.array(z.number().int().positive()).max(100).optional(), advancedFields: z.record(z.string().max(128), z.unknown()).refine((value) => Object.keys(value).length <= 100, "Máximo 100 metadatos avanzados.").optional() }).strict(),
     async execute({ id, ...changes }) {
       if (!Object.keys(changes).length) throw new Error("Indica al menos un cambio.");
       const data = await api(`/api/admin/entries/${id}`, "PATCH", changes); visible(data.scheduled ? `Contenido ${id} programado; hay una revisión previa disponible.` : `Contenido ${id} actualizado; hay una revisión previa disponible.`); return { id, updated: true, scheduled: Boolean(data.scheduled), publishedAt: data.publishedAt || null, reversibleVia: "revisiones" };

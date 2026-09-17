@@ -1,5 +1,6 @@
 const encoder = new TextEncoder();
 import { hasCorePermission } from "./_roles.js";
+import { agentToolAllows } from "./_agent-tool-contracts.js";
 // Cloudflare Workers rejects PBKDF2 counts above 100,000. Keeping this
 // deployable prevents an uncaught NotSupportedError during login.
 const PBKDF2_ITERATIONS = 100000;
@@ -63,45 +64,6 @@ function cookieValue(request, name) {
   return item ? decodeURIComponent(item.slice(name.length + 1)) : null;
 }
 
-function agentCapabilityAllows(request) {
-  const url = new URL(request.url);
-  const path = url.pathname.replace(/\/$/, "") || "/";
-  const method = request.method.toUpperCase();
-  const plugin = "[a-z0-9][a-z0-9-]{2,47}";
-  const taxonomy = "[a-z0-9][a-z0-9-]{2,47}";
-  const numericId = "[1-9][0-9]*";
-
-  if (method === "GET") {
-    if ([
-      "/api/admin/entries", "/api/admin/users", "/api/admin/taxonomies",
-      "/api/admin/menus", "/api/admin/plugins", "/api/admin/media",
-      "/api/admin/plugin-schema", "/api/admin/plugin-meta", "/api/admin/blocks",
-      "/api/admin/content", "/api/admin/content-types", "/api/admin/content-fields",
-    ].includes(path)) return true;
-    return new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}$`).test(path);
-  }
-  if (method === "POST") {
-    if ([
-      "/api/admin/entries", "/api/admin/taxonomies", "/api/admin/menus",
-      "/api/admin/plugins", "/api/admin/media-agent", "/api/admin/approvals", "/api/admin/content",
-    ].includes(path)) return true;
-    return new RegExp(`^/api/admin/users/${numericId}/active$`).test(path)
-      || new RegExp(`^/api/admin/trash/${numericId}$`).test(path)
-      || new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}$`).test(path);
-  }
-  if (method === "PATCH") {
-    return new RegExp(`^/api/admin/entries/${numericId}$`).test(path)
-      || new RegExp(`^/api/admin/content/${numericId}$`).test(path)
-      || new RegExp(`^/api/admin/plugins/${plugin}$`).test(path)
-      || /^\/api\/admin\/media\/[^/]+$/.test(path);
-  }
-  if (method === "PUT") {
-    if (["/api/admin/taxonomies", "/api/admin/menus", "/api/admin/plugin-meta"].includes(path)) return true;
-    return new RegExp(`^/api/admin/plugins/${plugin}/taxonomies/${taxonomy}/${numericId}$`).test(path);
-  }
-  return method === "DELETE" && new RegExp(`^/api/admin/entries/${numericId}$`).test(path);
-}
-
 async function currentSessionUser(request, env) {
   const token = cookieValue(request, "session");
   if (!token) return null;
@@ -117,11 +79,14 @@ async function currentUser(request, env) {
   // Browser JavaScript and agents never receive it from CloudPress.
   const authorization = request.headers.get("Authorization") || "";
   const match = /^Bearer ([A-Za-z0-9+/=_-]{32,256})$/.exec(authorization);
-  if (!match || !agentCapabilityAllows(request)) return null;
+  if (!match) return null;
   const tokenHash = bytesToBase64(await sha256(match[1]));
-  const user = await env.DB.prepare("SELECT users.id, users.username, users.role, users.active, agent_capabilities.id AS agent_capability_id FROM agent_capabilities JOIN users ON users.id = agent_capabilities.actor_id WHERE agent_capabilities.token_hash = ? AND agent_capabilities.revoked_at IS NULL AND agent_capabilities.expires_at > datetime('now') AND users.active = 1")
+  const user = await env.DB.prepare("SELECT users.id, users.username, users.role, users.active, agent_capabilities.id AS agent_capability_id, agent_capabilities.profile_id AS agent_profile_id FROM agent_capabilities JOIN users ON users.id = agent_capabilities.actor_id WHERE agent_capabilities.token_hash = ? AND agent_capabilities.revoked_at IS NULL AND agent_capabilities.expires_at > datetime('now') AND users.active = 1")
     .bind(tokenHash).first();
-  return user ? { ...user, auth_method: "agent_capability" } : null;
+  if (!user?.agent_profile_id) return null;
+  const grants = await env.DB.prepare("SELECT tool_name,risk FROM agent_profile_tools JOIN agent_profiles ON agent_profiles.id=agent_profile_tools.profile_id WHERE agent_profile_tools.profile_id=? AND agent_profiles.owner_id=? AND agent_profiles.status='active'").bind(user.agent_profile_id, user.id).all();
+  const contract = await agentToolAllows(request, grants.results.map((grant) => ({ name: grant.tool_name, risk: grant.risk })));
+  return contract ? { ...user, agent_tool_name: contract.name, auth_method: "agent_capability" } : null;
 }
 
 async function auditAgentCapabilityUse(request, env, user) {
@@ -191,4 +156,4 @@ function sanitizeHtml(value) {
   });
 }
 
-export { agentCapabilityAllows, base64ToBytes, bytesToBase64, cookieValue, currentSessionUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };
+export { base64ToBytes, bytesToBase64, cookieValue, currentSessionUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };

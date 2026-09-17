@@ -34,7 +34,7 @@
       row.className = "agent-capability-row";
       const detail = document.createElement("span");
       const expiration = new Date(capability.expiresAt).toLocaleString();
-      detail.textContent = `${capability.username} · ${capability.status} · vence ${expiration}`;
+      detail.textContent = `${capability.username} · perfil ${capability.profileId || "sin perfil"} · ${capability.status} · vence ${expiration}`;
       row.append(detail);
       if (capability.status === "active") {
         const revoke = document.createElement("button");
@@ -66,11 +66,12 @@
     const section = document.createElement("section");
     section.id = "cloudpress-agent-access";
     section.className = "card";
-    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><button type=\"button\" id=\"cloudpress-copy-agent-prompt\">Copiar instrucciones para mi agente</button><p class=\"muted\" id=\"cloudpress-agent-prompt-status\" role=\"status\"></p><p class=\"muted\" id=\"cloudpress-companion-status\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
+    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><label class=\"field\">Perfil que recibirá el agente<select id=\"cloudpress-agent-profile\" required><option value=\"\">Cargando perfiles…</option></select></label><p class=\"muted\">La credencial sólo podrá usar las herramientas y la clasificación de datos del perfil elegido.</p><button type=\"button\" id=\"cloudpress-copy-agent-prompt\">Copiar instrucciones para mi agente</button><p class=\"muted\" id=\"cloudpress-agent-prompt-status\" role=\"status\"></p><p class=\"muted\" id=\"cloudpress-companion-status\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
     const message = section.querySelector("#cloudpress-companion-status");
     const list = section.querySelector(".agent-capability-list");
     const copyButton = section.querySelector("#cloudpress-copy-agent-prompt");
     const copyStatus = section.querySelector("#cloudpress-agent-prompt-status");
+    const profileSelect = section.querySelector("#cloudpress-agent-profile");
     copyButton.addEventListener("click", async () => {
       copyButton.disabled = true;
       try {
@@ -85,6 +86,17 @@
     document.querySelector("main")?.append(section);
     await renderCapabilities(list);
     try {
+      const profiles = (await api("/api/admin/agent-tasks")).profiles.filter((item) => item.status === "active");
+      profileSelect.replaceChildren(...profiles.map((item) => new Option(`${item.label} · hasta ${item.dataPolicy.maximumClassification}`, item.id)));
+      if (!profiles.length) {
+        message.textContent = "Primero crea un perfil en Operaciones de agentes.";
+        return;
+      }
+    } catch (error) {
+      message.textContent = error.message || "No se pudieron cargar los perfiles de agente.";
+      return;
+    }
+    try {
       const statusResponse = await fetch("http://127.0.0.1:9463/v1/cloudpress/agent-status", { mode: "cors", credentials: "omit", headers: channelHeaders() });
       const status = await statusResponse.json();
       if (!statusResponse.ok || !status.ok) throw new Error("No se pudo comprobar el companion local.");
@@ -96,10 +108,11 @@
         message.textContent = "Agente local vinculado. La capacidad se guarda en el almacén seguro del sistema.";
         return;
       }
-      message.textContent = "Vinculando el agente local con la sesión Admin existente…";
+      if (!profileSelect.value) { message.textContent = "Selecciona el perfil que recibirá el agente local."; return; }
+      message.textContent = "Vinculando el agente local con el perfil seleccionado…";
       let capability = null;
       try {
-        capability = await api("/api/admin/agent-capability", "POST");
+        capability = await api("/api/admin/agent-capability", "POST", { profileId: profileSelect.value });
         const response = await fetch("http://127.0.0.1:9463/v1/cloudpress/agent-capabilities", {
           method: "POST", mode: "cors", credentials: "omit", headers: { "content-type": "application/json" },
           body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin: location.origin, capability: { id: capability.id, token: capability.token, expires_at: capability.expiresAt } }),

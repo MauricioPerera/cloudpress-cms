@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import { bytesToBase64 } from "../functions/_shared.js";
+import { onRequestGet, onRequestPost } from "../functions/api/admin/agent-tasks.js";
+
+const database = new DatabaseSync(":memory:");
+database.exec(await readFile("schema.sql", "utf8"));
+const wrap = (sql, values = []) => ({
+  async first(column) { const row = database.prepare(sql).get(...values) ?? null; return column && row ? row[column] : row; },
+  async all() { return { results: database.prepare(sql).all(...values) }; },
+  async run() { const result = database.prepare(sql).run(...values); return { meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid || 0) } }; },
+});
+const DB = { prepare(sql) { return { bind(...values) { return wrap(sql, values); }, ...wrap(sql) }; }, async batch(statements) { return Promise.all(statements.map((statement) => statement.run())); } };
+await database.prepare("INSERT INTO users(username,password_hash,password_salt,role) VALUES(?,?,?,?)").run("admin", "hash", "salt", "admin");
+const token = "a".repeat(44), hash = bytesToBase64(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))));
+await database.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,?)").run(1, hash, new Date(Date.now() + 60_000).toISOString());
+const env = { DB }, headers = { Cookie: `session=${token}`, "content-type": "application/json" };
+const request = (path, method = "GET", body) => new Request(`https://cms.example${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+
+const profile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "editor-agent", label: "Agente editorial", purpose: "Preparar borradores verificables", maxActiveRuns: 1, maxStepsPerRun: 3, dataPolicy: { maximumClassification: "internal", allowSensitive: false }, tools: [{ name: "cloudpress_read_admin_state", risk: "read" }, { name: "cloudpress_create_draft", risk: "reversible" }] }), env });
+assert.equal(profile.status, 201, "Un administrador puede crear un perfil de agente limitado.");
+const task = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Preparar un borrador", plan: [{ tool: "cloudpress_read_admin_state", risk: "read", preconditions: { authenticated: true }, expected: { resource: "content" } }, { tool: "cloudpress_create_draft", risk: "reversible", expected: { status: "draft" } }], context: { contentType: "post", classification: "internal" }, expected: { draft: true } }), env });
+assert.equal(task.status, 201, "Una tarea dentro de los límites del perfil queda persistida.");
+const taskInfo = await task.json();
+const started = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: taskInfo.task.id, state: "running" }), env });
+assert.equal(started.status, 200, "Una tarea en cola puede iniciar una ejecución.");
+const firstStep = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: taskInfo.task.id, ordinal: 1 }), env });
+assert.equal(firstStep.status, 200, "El primer paso se reclama en orden.");
+const unverified = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 1, outcome: { result: { items: 1 }, verification: { verified: false } } }), env });
+assert.equal(unverified.status, 422, "Un paso no concluye sin postcondición verificada.");
+const verified = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 1, outcome: { result: { items: 1 }, verification: { verified: true, check: "estado leído" } } }), env });
+assert.equal(verified.status, 200, "El resultado verificado se registra en el paso.");
+await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: taskInfo.task.id, ordinal: 2 }), env });
+await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 2, outcome: { result: { status: "draft" }, verification: { verified: true, check: "borrador creado" } } }), env });
+const completed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: taskInfo.task.id, state: "completed" }), env });
+assert.equal(completed.status, 200, "Una tarea sólo termina cuando todos sus pasos están verificados.");
+const denied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Operación no permitida", plan: [{ tool: "cloudpress_sensitive_action", risk: "sensitive" }] }), env });
+assert.equal(denied.status, 422, "Un perfil no puede planear una herramienta fuera de su contrato.");
+const classifiedDenied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Datos fuera de política", plan: [], context: { classification: "restricted" } }), env });
+assert.equal(classifiedDenied.status, 422, "Un perfil no puede recibir datos por encima de su clasificación permitida.");
+const sensitiveProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "operations-agent", label: "Agente de operaciones", purpose: "Ejecutar acciones A2F", maxActiveRuns: 1, maxStepsPerRun: 2, dataPolicy: { maximumClassification: "restricted", allowSensitive: true }, tools: [{ name: "cloudpress_sensitive_action", risk: "sensitive" }] }), env });
+assert.equal(sensitiveProfile.status, 201);
+const sensitiveTask = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "operations-agent", objective: "Purgar tras aprobación", plan: [{ tool: "cloudpress_sensitive_action", risk: "sensitive", preconditions: { approvalOperation: "purge_content" }, expected: { deleted: "content" } }], context: { classification: "restricted" } }), env });
+const sensitiveTaskInfo = await sensitiveTask.json();
+await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: sensitiveTaskInfo.task.id, state: "running" }), env });
+const waiting = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: sensitiveTaskInfo.task.id, ordinal: 1 }), env });
+assert.equal((await waiting.json()).step.requiresApproval, true, "Un paso sensible se pausa antes de ejecutar.");
+const approvalId = crypto.randomUUID(), stamp = new Date().toISOString();
+await database.prepare("INSERT INTO approval_requests(id,actor_id,operation,payload_json,summary_json,token_hash,expires_at,state,prepared_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(approvalId, 1, "purge_content", JSON.stringify({ operation: "purge_content", contentId: 7 }), "{}", "hash", stamp, "accepted", stamp, stamp);
+const sensitiveDone = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_sensitive_step", taskId: sensitiveTaskInfo.task.id, ordinal: 1, approvalRequestId: approvalId, outcome: { result: { deleted: "content", id: 7 }, verification: { verified: true, check: "aprobación A2F aceptada" } } }), env });
+assert.equal(sensitiveDone.status, 200, "Un paso sensible sólo concluye con una aprobación A2F aceptada y postcondición verificada.");
+const retryTask = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Tarea reintentable", plan: [{ tool: "cloudpress_read_admin_state", risk: "read" }], context: { classification: "public" } }), env });
+const retryInfo = await retryTask.json();
+await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: retryInfo.task.id, state: "running" }), env });
+await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: retryInfo.task.id, ordinal: 1 }), env });
+const failed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "fail_step", taskId: retryInfo.task.id, ordinal: 1, error: "El recurso remoto no estuvo disponible" }), env });
+assert.equal(failed.status, 200, "Un agente puede registrar un fallo trazable sin completar el paso.");
+const retried = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "retry_task", taskId: retryInfo.task.id }), env });
+assert.equal(retried.status, 200, `El reintento debe aceptarse: ${await retried.clone().text()}`);
+assert.equal((await retried.json()).task.attempt, 2, "Una tarea fallida crea una ejecución nueva al reintentarse.");
+const detail = await onRequestGet({ request: request(`/api/admin/agent-tasks?taskId=${taskInfo.task.id}`), env });
+const loaded = (await detail.json()).task;
+assert.equal(loaded.runs[0].steps.length, 2, "Los pasos del plan se conservan con su orden.");
+assert.equal(loaded.runs[0].steps[0].verification.verified, true, "La postcondición verificada queda asociada al paso.");
+assert.equal(loaded.trace.some((event) => event.event === "step_verified"), true, "La verificación se incorpora a la traza correlacionada.");
+const listed = await onRequestGet({ request: request("/api/admin/agent-tasks"), env });
+assert.equal((await listed.json()).profiles.find((item) => item.id === "editor-agent").tools.length, 2, "La consulta devuelve las herramientas permitidas por perfil.");
+database.close();
+console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "profile-discovery"] }));

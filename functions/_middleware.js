@@ -7,7 +7,7 @@ const adminPaths = new Set([
   "/taxonomias", "/taxonomias.html", "/menus", "/menus.html", "/organizacion", "/organizacion.html",
   "/herramientas", "/herramientas.html", "/importar", "/importar.html", "/exportar", "/exportar.html",
   "/programar", "/programar.html", "/revisiones", "/revisiones.html"
-  , "/plugins", "/plugins.html", "/plugin-admin", "/plugin-admin.html", "/roles", "/roles.html", "/content-types", "/content-types.html", "/content-fields", "/content-fields.html", "/core-content", "/core-content.html", "/advanced-fields", "/advanced-fields.html"
+  , "/plugins", "/plugins.html", "/plugin-admin", "/plugin-admin.html", "/roles", "/roles.html", "/content-types", "/content-types.html", "/content-fields", "/content-fields.html", "/core-content", "/core-content.html", "/advanced-fields", "/advanced-fields.html", "/agent-operations", "/agent-operations.html"
 ]);
 const memberPaths = new Set(["/perfil", "/perfil.html"]);
 const authorPaths = new Set(["/editor", "/editor.html"]);

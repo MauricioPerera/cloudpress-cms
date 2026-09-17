@@ -523,6 +523,148 @@
         }
       }
     },
+    "/api/admin/agent-tasks": {
+      "get": {
+        "operationId": "get__api_admin_agent_tasks",
+        "summary": "Implementado por functions/api/admin/agent-tasks.js",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-cloudpress-agent-access": "none",
+        "parameters": [
+          []
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta en JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "403": {
+            "description": "Autorización insuficiente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "422": {
+            "description": "Entrada válida sintácticamente pero rechazada por reglas de negocio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_admin_agent_tasks",
+        "summary": "Implementado por functions/api/admin/agent-tasks.js",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-cloudpress-agent-access": "none",
+        "parameters": [
+          []
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta en JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "403": {
+            "description": "Autorización insuficiente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "422": {
+            "description": "Entrada válida sintácticamente pero rechazada por reglas de negocio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/approvals": {
       "post": {
         "operationId": "post__api_admin_approvals",
