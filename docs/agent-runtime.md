@@ -28,4 +28,4 @@ Cada paso puede declarar `dependsOn` con ordinales anteriores. Si se omite, cons
 
 Un lease vencido vuelve a la cola. Al reanudar, CloudPress materializa un contexto nuevo con el plan inmutable, resultados ya verificados, memoria episódica y mensajes pendientes, todo saneado y con hash. Los eventos de claim, checkpoint, memoria, mensajes, delegación, herramientas y uso de modelos comparten la traza de la tarea.
 
-El catálogo de modelos conserva residencia y presupuestos; habilitar una ruta de proveedor es una configuración separada y explícita. Registrar uso no autoriza inferencia ni envío de datos a un proveedor.
+El catálogo de modelos conserva residencia y presupuestos. `external-webmcp` se ejecuta en el runner local; `cloudflare-workers-ai` usa `env.AI.run()` exclusivamente si Pages tiene un binding **AI** configurado en el panel de Cloudflare y el modelo fue habilitado de forma explícita. Registrar uso no autoriza inferencia ni envío de datos a un proveedor. Sin ese binding, `invoke_model` falla cerradamente y no envía el prompt a ninguna red.

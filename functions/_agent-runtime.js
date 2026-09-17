@@ -168,6 +168,41 @@ export async function routeAgentModel(env, agent, jobId, leaseId, request) {
   return { id: model.id, providerId: model.provider_id, modelId: model.model_id, label: model.label, dataResidency: model.data_residency, estimatedCostMicrounits, budgetMicrounits: budget };
 }
 
+function modelText(response) {
+  if (typeof response === "string") return response.slice(0, 12000);
+  if (typeof response?.response === "string") return response.response.slice(0, 12000);
+  if (typeof response?.result?.response === "string") return response.result.response.slice(0, 12000);
+  return JSON.stringify(safe(response)).slice(0, 12000);
+}
+
+// The provider boundary deliberately has no generic URL or API-key adapter.
+// `external-webmcp` is executed by the local runner; Workers AI is invoked only
+// through Cloudflare's in-process binding after a catalog/policy route.
+export async function invokeAgentModel(env, agent, jobId, leaseId, request) {
+  const prompt = String(request?.prompt || "").trim();
+  if (!prompt || prompt.length > 16000) throw new Error("Prompt de inferencia inválido.");
+  const job = await leasedJob(env, agent, jobId, leaseId);
+  const routed = await routeAgentModel(env, agent, jobId, leaseId, request);
+  if (routed.providerId !== "cloudflare-workers-ai") throw new Error("El proveedor external-webmcp se ejecuta fuera de CloudPress; no se puede invocar desde el Worker.");
+  if (!env.AI?.run) throw new Error("Workers AI no está configurado para Pages. Añade el binding AI en el panel de Cloudflare antes de habilitar este modelo.");
+  let response;
+  try {
+    response = await env.AI.run(routed.modelId, { messages: [{ role: "user", content: prompt }] });
+  } catch (error) {
+    await runtimeTrace(env, job, "model_invocation_failed", { provider: routed.providerId, model: routed.modelId, reason: String(error?.message || "provider_error").slice(0, 500) });
+    throw new Error("Workers AI no pudo completar la inferencia.");
+  }
+  const output = modelText(response), usage = response?.usage && typeof response.usage === "object" ? response.usage : {};
+  const inputTokens = Number.isInteger(Number(usage.input_tokens ?? usage.inputTokens)) ? Number(usage.input_tokens ?? usage.inputTokens) : Number(request.estimatedInputTokens || 0);
+  const outputTokens = Number.isInteger(Number(usage.output_tokens ?? usage.outputTokens)) ? Number(usage.output_tokens ?? usage.outputTokens) : 0;
+  const catalog = await env.DB.prepare("SELECT input_cost_microunits,output_cost_microunits FROM agent_model_catalog WHERE id=?").bind(routed.id).first();
+  const costMicrounits = inputTokens * Number(catalog?.input_cost_microunits || 0) + outputTokens * Number(catalog?.output_cost_microunits || 0);
+  const stamp = now();
+  await env.DB.prepare("INSERT INTO agent_model_usage(id,task_id,run_id,model_catalog_id,provider_id,model_id,input_tokens,output_tokens,cost_microunits,evidence_level,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), job.task_id, job.run_id, routed.id, routed.providerId, routed.modelId, inputTokens, outputTokens, costMicrounits, "server-verified", stamp).run();
+  await runtimeTrace(env, job, "model_invoked", { provider: routed.providerId, model: routed.modelId, inputTokens, outputTokens, costMicrounits, evidenceLevel: "server-verified" });
+  return { model: routed, output, usage: { inputTokens, outputTokens, costMicrounits, evidenceLevel: "server-verified" } };
+}
+
 export async function writeEpisodicMemory(env, agent, jobId, leaseId, body) {
   const summary = body?.summary, provenance = body?.provenance ?? {}, classification = String(body?.classification || "internal");
   if (!validObject(summary, 4000) || !validObject(provenance, 4000)) throw new Error("Memoria episódica inválida.");

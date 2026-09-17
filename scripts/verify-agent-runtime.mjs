@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { checkpointAgentRuntimeJob, claimAgentRuntimeJob, dispatchDueAgentTasks, heartbeatAgentRuntimeJob, recordAgentModelUsage, routeAgentModel, syncAgentRuntimeTask, upsertAgentModel } from "../functions/_agent-runtime.js";
+import { checkpointAgentRuntimeJob, claimAgentRuntimeJob, dispatchDueAgentTasks, heartbeatAgentRuntimeJob, invokeAgentModel, recordAgentModelUsage, routeAgentModel, syncAgentRuntimeTask, upsertAgentModel } from "../functions/_agent-runtime.js";
 import { transitionTask } from "../functions/_agent-os.js";
 import { delegateAgentTask, listAgentMessages, recallEpisodicMemories, sendAgentMessage, writeEpisodicMemory } from "../functions/_agent-runtime.js";
 
@@ -13,7 +13,7 @@ const wrap = (sql, values = []) => ({
   async run() { const result = database.prepare(sql).run(...values); return { meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid || 0) } }; },
 });
 const DB = { prepare(sql) { return { bind(...values) { return wrap(sql, values); }, ...wrap(sql) }; }, async batch(statements) { return Promise.all(statements.map((statement) => statement.run())); } };
-const env = { DB }, stamp = new Date().toISOString();
+const env = { DB, AI: { async run(model, payload) { assert.equal(model, "@cf/test/runtime"); assert.equal(payload.messages[0].content, "resume el estado"); return { response: "estado resumido", usage: { input_tokens: 4, output_tokens: 3 } }; } } }, stamp = new Date().toISOString();
 const taskId = "00000000-0000-0000-0000-000000000001", runId = "00000000-0000-0000-0000-000000000002", jobId = "00000000-0000-0000-0000-000000000003";
 database.prepare("INSERT INTO users(id,username,password_hash,password_salt,role) VALUES(?,?,?,?,?)").run(1, "admin", "hash", "salt", "admin");
 database.prepare("INSERT INTO agent_profiles(id,owner_id,label,purpose,data_policy_json) VALUES(?,?,?,?,?)").run("runtime-agent", 1, "Runtime", "Ejecutar", JSON.stringify({ maximumClassification: "internal", allowSensitive: false, modelResidency: "any", governance: { budget: { maxModelCostMicrounits: 100 } } }));
@@ -40,9 +40,13 @@ assert.ok(heartbeated.leaseExpiresAt > heartbeatNow, "El heartbeat renueva el le
 await upsertAgentModel(env, agent, { providerId: "external-webmcp", modelId: "browser-agent", label: "Browser", dataResidency: "mx", maxInputTokens: 100, maxOutputTokens: 100, inputCostMicrounits: 2, outputCostMicrounits: 3, status: "enabled" });
 const routed = await routeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "browser-agent", estimatedInputTokens: 10, estimatedOutputTokens: 10 });
 assert.equal(routed.estimatedCostMicrounits, 50, "El router respeta los precios del catálogo y el presupuesto del perfil.");
+await upsertAgentModel(env, agent, { providerId: "cloudflare-workers-ai", modelId: "@cf/test/runtime", label: "Workers AI", dataResidency: "mx", maxInputTokens: 100, maxOutputTokens: 100, inputCostMicrounits: 1, outputCostMicrounits: 1, status: "enabled" });
+const inference = await invokeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "@cf/test/runtime", estimatedInputTokens: 4, estimatedOutputTokens: 3, prompt: "resume el estado" });
+assert.equal(inference.output, "estado resumido", "El adaptador Workers AI invoca únicamente el modelo enrutado.");
+assert.equal(inference.usage.costMicrounits, 7, "El coste de inferencia se calcula con el catálogo y tokens devueltos por el binding.");
 const modelUsage = await recordAgentModelUsage(env, agent, jobId, assignment.job.leaseId, { providerId: "external-webmcp", modelId: "browser-agent", inputTokens: 12, outputTokens: 8, costMicrounits: 0 });
 assert.equal(modelUsage.evidenceLevel, "server-verified", "Un modelo catalogado calcula coste verificable en servidor.");
-assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_model_usage WHERE run_id=?").get(runId).total, 1, "El uso de modelo queda correlacionado a la ejecución.");
+assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_model_usage WHERE run_id=?").get(runId).total, 2, "El uso atestado y la inferencia verificada quedan correlacionados a la ejecución.");
 const memory = await writeEpisodicMemory(env, agent, jobId, assignment.job.leaseId, { classification: "internal", summary: { fact: "estado preparado" }, provenance: { source: "runtime-test" } });
 assert.match(memory.payloadSha256, /^[a-f0-9]{64}$/, "La memoria conserva un hash de procedencia.");
 assert.equal((await recallEpisodicMemories(env, agent)).at(0).summary.fact, "estado preparado", "El perfil sólo recupera su memoria episódica permitida.");
