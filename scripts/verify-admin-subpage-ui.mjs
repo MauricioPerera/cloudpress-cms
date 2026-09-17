@@ -23,6 +23,6 @@ assert.ok(shell.includes("roles:['/roles.html'"), 'Roles debe abrirse dentro del
 assert.ok(shell.includes("'content-types':['/content-types.html'"), 'Tipos de contenido debe abrirse dentro del shell administrativo real');
 assert.ok(shell.includes('contextualActions'), 'La acción superior debe depender de la vista actual');
 const agentOperations = await read('agent-operations.html');
-for (const token of ['set_profile_status', 'Revocar perfil', 'cloudpress_restore_content', 'cloudpress_upload_media', 'cloudpress_update_media_meta']) assert.ok(agentOperations.includes(token), `La consola de agentes debe incluir ${token}`);
+for (const token of ['data-admin-view="agent-operations"', 'admin-subpage.css', 'class="shell"', 'class="sidebar"', 'class="topbar"', 'class="content"', 'set_profile_status', 'Revocar perfil', 'cloudpress_restore_content', 'cloudpress_upload_media', 'cloudpress_update_media_meta']) assert.ok(agentOperations.includes(token), `La consola de agentes debe incluir ${token}`);
 for (const [, source] of agentOperations.matchAll(/<script(?:[^>]*)>([\s\S]*?)<\/script>/g)) parse(source, { ecmaVersion: 'latest' });
 console.log('UI administrativa de Roles, Tipos de contenido y Agentes verificada.');
