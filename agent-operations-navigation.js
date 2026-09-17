@@ -17,4 +17,6 @@
     button.onclick = () => open(view);
     group.append(button);
   }
+  const requested = new URLSearchParams(location.search).get("view");
+  if (views.some(([view]) => view === requested)) open(requested);
 })();
