@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { parse } from 'acorn';
 
 const read = file => readFile(new URL(`../${file}`, import.meta.url), 'utf8');
 const css = await read('admin-subpage.css');
@@ -23,4 +24,5 @@ assert.ok(shell.includes("'content-types':['/content-types.html'"), 'Tipos de co
 assert.ok(shell.includes('contextualActions'), 'La acción superior debe depender de la vista actual');
 const agentOperations = await read('agent-operations.html');
 for (const token of ['set_profile_status', 'Revocar perfil', 'cloudpress_restore_content', 'cloudpress_upload_media', 'cloudpress_update_media_meta']) assert.ok(agentOperations.includes(token), `La consola de agentes debe incluir ${token}`);
+for (const [, source] of agentOperations.matchAll(/<script(?:[^>]*)>([\s\S]*?)<\/script>/g)) parse(source, { ecmaVersion: 'latest' });
 console.log('UI administrativa de Roles, Tipos de contenido y Agentes verificada.');
