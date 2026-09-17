@@ -26,6 +26,10 @@ assert.equal(redactedTrace.nested.password, "[redacted]", "Las trazas no persist
 
 const profile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "editor-agent", label: "Agente editorial", purpose: "Preparar borradores verificables", maxActiveRuns: 1, maxStepsPerRun: 3, dataPolicy: { maximumClassification: "internal", allowSensitive: false }, tools: [{ name: "cloudpress_read_admin_state", risk: "read" }, { name: "cloudpress_create_draft", risk: "reversible" }] }), env });
 assert.equal(profile.status, 201, "Un administrador puede crear un perfil de agente limitado.");
+const pausedProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "set_profile_status", profileId: "editor-agent", status: "paused" }), env });
+assert.equal((await pausedProfile.clone().json()).profile.status, "paused", "Un administrador puede pausar un perfil de agente sin borrar su trazabilidad.");
+const reactivatedProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "set_profile_status", profileId: "editor-agent", status: "active" }), env });
+assert.equal((await reactivatedProfile.clone().json()).profile.status, "active", "Un perfil pausado puede reactivarse de forma explícita.");
 const task = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Preparar un borrador", plan: [{ tool: "cloudpress_read_admin_state", risk: "read", preconditions: { authenticated: true }, expected: { resource: "content" } }, { tool: "cloudpress_create_draft", risk: "reversible", expected: { status: "draft" } }], context: { contentType: "post", classification: "internal" }, expected: { draft: true } }), env });
 assert.equal(task.status, 201, "Una tarea dentro de los límites del perfil queda persistida.");
 const taskInfo = await task.json();
@@ -78,5 +82,11 @@ assert.equal(loaded.runs[0].steps[0].verification.verified, true, "La postcondic
 assert.equal(loaded.trace.some((event) => event.event === "step_verified"), true, "La verificación se incorpora a la traza correlacionada.");
 const listed = await onRequestGet({ request: request("/api/admin/agent-tasks"), env });
 assert.equal((await listed.json()).profiles.find((item) => item.id === "editor-agent").tools.length, 2, "La consulta devuelve las herramientas permitidas por perfil.");
+await database.prepare("INSERT INTO agent_capabilities(id,actor_id,profile_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)").run(crypto.randomUUID(), 1, "editor-agent", "test-hash", new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
+const revokedProfile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "set_profile_status", profileId: "editor-agent", status: "revoked" }), env });
+assert.equal((await revokedProfile.clone().json()).profile.status, "revoked", "Un administrador puede revocar definitivamente un perfil.");
+assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_capabilities WHERE profile_id='editor-agent' AND revoked_at IS NOT NULL").get().total, 1, "Revocar el perfil invalida sus capacidades pendientes.");
+const reviveRevoked = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "set_profile_status", profileId: "editor-agent", status: "active" }), env });
+assert.equal(reviveRevoked.status, 422, "Un perfil revocado no puede reactivarse silenciosamente.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "pause-resume-active-step", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "profile-lifecycle", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "pause-resume-active-step", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));

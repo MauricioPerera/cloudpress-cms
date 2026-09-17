@@ -1,5 +1,5 @@
 import { json, requireAdmin } from "../../_shared.js";
-import { createProfile, createTask, failStep, finishSensitiveStep, finishStep, listProfiles, retryTask, startStep, taskDetail, transitionTask } from "../../_agent-os.js";
+import { createProfile, createTask, failStep, finishSensitiveStep, finishStep, listProfiles, retryTask, setProfileStatus, startStep, taskDetail, transitionTask } from "../../_agent-os.js";
 
 const canManage = (request, env) => requireAdmin(request, env, "scheduler:manage");
 
@@ -16,6 +16,7 @@ export async function onRequestPost({ request, env }) {
   const body = await request.json().catch(() => null);
   try {
     if (body?.action === "create_profile") return json({ profile: await createProfile(env, admin.id, body) }, 201);
+    if (body?.action === "set_profile_status") return json({ profile: await setProfileStatus(env, admin.id, String(body.profileId || ""), String(body.status || "")) });
     if (body?.action === "create_task") return json({ task: await createTask(env, admin, body) }, 201);
     if (body?.action === "transition_task") return json({ task: await transitionTask(env, admin, String(body.taskId || ""), String(body.state || ""), body.reason) });
     if (body?.action === "start_step") return json({ step: await startStep(env, admin, String(body.taskId || ""), Number(body.ordinal)) });

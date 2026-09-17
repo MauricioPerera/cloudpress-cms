@@ -21,4 +21,6 @@ const shell = await read('wp-admin.html');
 assert.ok(shell.includes("roles:['/roles.html'"), 'Roles debe abrirse dentro del shell administrativo real');
 assert.ok(shell.includes("'content-types':['/content-types.html'"), 'Tipos de contenido debe abrirse dentro del shell administrativo real');
 assert.ok(shell.includes('contextualActions'), 'La acción superior debe depender de la vista actual');
-console.log('UI administrativa de Roles y Tipos de contenido verificada.');
+const agentOperations = await read('agent-operations.html');
+for (const token of ['set_profile_status', 'Revocar perfil', 'cloudpress_restore_content', 'cloudpress_upload_media', 'cloudpress_update_media_meta']) assert.ok(agentOperations.includes(token), `La consola de agentes debe incluir ${token}`);
+console.log('UI administrativa de Roles, Tipos de contenido y Agentes verificada.');

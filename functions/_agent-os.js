@@ -60,6 +60,20 @@ async function createProfile(env, actorId, body) {
   return getProfile(env, profile.id);
 }
 
+async function setProfileStatus(env, actorId, profileId, status) {
+  if (!PROFILE_ID.test(String(profileId || "")) || !new Set(["active", "paused", "revoked"]).has(status)) throw new Error("Estado de perfil inválido.");
+  const profile = await getProfile(env, profileId);
+  if (!profile || profile.ownerId !== actorId) throw new Error("El perfil de agente no está disponible para este usuario.");
+  if (profile.status === "revoked" && status !== "revoked") throw new Error("Un perfil revocado no puede reactivarse.");
+  if (profile.status !== status) {
+    const stamp = now();
+    await env.DB.prepare("UPDATE agent_profiles SET status=?,updated_at=? WHERE id=? AND owner_id=?").bind(status, stamp, profileId, actorId).run();
+    if (status === "revoked") await env.DB.prepare("UPDATE agent_capabilities SET revoked_at=? WHERE profile_id=? AND revoked_at IS NULL").bind(stamp, profileId).run();
+    await trace(env, { traceId: crypto.randomUUID(), actorId, event: "profile_status_changed", details: { profileId, from: profile.status, to: status } });
+  }
+  return getProfile(env, profileId);
+}
+
 async function createTask(env, actor, body) {
   const profileId = String(body?.profileId || ""), objective = String(body?.objective || "").trim();
   const plan = body?.plan ?? [], context = body?.context ?? {}, expected = body?.expected ?? {};
@@ -264,4 +278,4 @@ async function retryTask(env, actor, taskId) {
   return { id: taskId, runId, attempt: run.attempt + 1, state: "queued" };
 }
 
-export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, retryTask, startStep, taskDetail, trace, transitionTask };
+export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, retryTask, setProfileStatus, startStep, taskDetail, trace, transitionTask };
