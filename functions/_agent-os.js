@@ -189,6 +189,21 @@ async function startStep(env, actor, taskId, ordinal) {
   return { id: step.id, state: "running", tool: step.tool_name };
 }
 
+// A task is complete only when its server-persisted run has no outstanding
+// steps.  This keeps agents from leaving an otherwise successful run in
+// `running`, while preserving the supervisor's explicit completion guard.
+async function completeRunIfVerified(env, task, run, actorId) {
+  const pending = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id).first();
+  if (pending) return false;
+  const stamp = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE agent_runs SET state='completed',completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(stamp, stamp, run.id),
+    env.DB.prepare("UPDATE agent_tasks SET state='completed',completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(stamp, stamp, task.id),
+  ]);
+  await trace(env, { traceId: task.trace_id, taskId: task.id, runId: run.id, actorId, event: "task_completed", details: { reason: "all_steps_verified" } });
+  return true;
+}
+
 async function finishStep(env, actor, taskId, ordinal, outcome) {
   if (!Number.isInteger(ordinal) || ordinal < 1 || !validObject(outcome?.result ?? {}) || !validObject(outcome?.verification ?? {})) throw new Error("Resultado de paso inválido.");
   const { task, run } = await currentTaskRun(env, taskId);
@@ -198,7 +213,7 @@ async function finishStep(env, actor, taskId, ordinal, outcome) {
   const stamp = now();
   await env.DB.prepare("UPDATE agent_steps SET state='completed',result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='running'").bind(JSON.stringify(outcome.result), JSON.stringify(outcome.verification), stamp, stamp, step.id).run();
   await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "step_verified", details: { ordinal, tool: step.tool_name, verification: outcome.verification } });
-  return { id: step.id, state: "completed", verified: true };
+  return { id: step.id, state: "completed", verified: true, taskCompleted: await completeRunIfVerified(env, task, run, actor.id) };
 }
 
 async function failStep(env, actor, taskId, ordinal, errorText) {
@@ -258,7 +273,7 @@ async function finishSensitiveStep(env, actor, taskId, ordinal, approvalRequestI
     env.DB.prepare("UPDATE agent_tasks SET state='running',updated_at=? WHERE id=? AND state='waiting_approval'").bind(stamp, taskId),
   ]);
   await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "sensitive_step_verified", details: { ordinal, tool: step.tool_name, approvalRequestId, operation: payload.operation, verification } });
-  return { id: step.id, state: "completed", verified: true, approvalRequestId };
+  return { id: step.id, state: "completed", verified: true, approvalRequestId, taskCompleted: await completeRunIfVerified(env, task, run, actor.id) };
 }
 
 async function retryTask(env, actor, taskId) {

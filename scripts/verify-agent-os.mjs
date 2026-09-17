@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { bytesToBase64 } from "../functions/_shared.js";
-import { trace } from "../functions/_agent-os.js";
+import { taskDetail, trace } from "../functions/_agent-os.js";
 import { onRequestGet, onRequestPost } from "../functions/api/admin/agent-tasks.js";
 
 const database = new DatabaseSync(":memory:");
@@ -42,9 +42,9 @@ assert.equal(unverified.status, 422, "Un paso no concluye sin postcondición ver
 const verified = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 1, outcome: { result: { items: 1 }, verification: { verified: true, check: "estado leído" } } }), env });
 assert.equal(verified.status, 200, "El resultado verificado se registra en el paso.");
 await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: taskInfo.task.id, ordinal: 2 }), env });
-await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 2, outcome: { result: { status: "draft" }, verification: { verified: true, check: "borrador creado" } } }), env });
-const completed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: taskInfo.task.id, state: "completed" }), env });
-assert.equal(completed.status, 200, "Una tarea sólo termina cuando todos sus pasos están verificados.");
+const completed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "finish_step", taskId: taskInfo.task.id, ordinal: 2, outcome: { result: { status: "draft" }, verification: { verified: true, check: "borrador creado" } } }), env });
+assert.equal((await completed.json()).step.taskCompleted, true, "Una tarea termina automáticamente sólo cuando todos sus pasos están verificados.");
+assert.equal((await taskDetail(env, taskInfo.task.id)).state, "completed", "La tarea persistida ya no queda en ejecución tras su último paso.");
 const denied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Operación no permitida", plan: [{ tool: "cloudpress_sensitive_action", risk: "sensitive" }] }), env });
 assert.equal(denied.status, 422, "Un perfil no puede planear una herramienta fuera de su contrato.");
 const classifiedDenied = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_task", profileId: "editor-agent", objective: "Datos fuera de política", plan: [], context: { classification: "restricted" } }), env });

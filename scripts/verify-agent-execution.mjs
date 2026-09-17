@@ -38,6 +38,8 @@ await database.prepare("INSERT INTO content_items(id,kind,content_type,title,slu
 const completed = await onRequestPost({ request: request({ action: "finish_step", taskId, ordinal: 1, outcome: { result: { id: 41 }, verification: { verified: true, check: "borrador creado" } } }), env: { DB } });
 assert.equal(completed.status, 200, "La credencial puede persistir un resultado verificado.");
 assert.equal((await completed.clone().json()).step.verified, true, "La postcondición se acepta sólo tras comprobar el estado persistido.");
+assert.equal((await completed.json()).step.taskCompleted, true, "El último paso verificado completa automáticamente su tarea.");
+assert.equal(database.prepare("SELECT state FROM agent_tasks WHERE id=?").get(taskId).state, "completed", "La tarea no queda ejecutándose tras terminar todos sus pasos.");
 assert.equal(JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(runId).verification_json).source, "server-state", "El contenido verificable conserva evidencia del servidor.");
 const pluginTaskId = crypto.randomUUID(), pluginRunId = crypto.randomUUID();
 await database.prepare("INSERT INTO plugin_installations(plugin_id,manifest_json,status,installed_by,installed_at,updated_at) VALUES(?,?,?,?,?,?)").run("cloudpress-commerce", "{}", "enabled", 1, stamp, stamp);
@@ -70,4 +72,4 @@ const sensitiveStep = database.prepare("SELECT result_json,verification_json FRO
 assert.deepEqual(JSON.parse(sensitiveStep.result_json), { deleted: "content", id: 41 }, "El resultado sensible persistido procede de la aprobación, no de la declaración del agente.");
 assert.equal(JSON.parse(sensitiveStep.verification_json).source, "server-approved-action", "La evidencia sensible identifica la ejecución A2F en el servidor.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "unified-business-tool-trace", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "unified-business-tool-trace", "automatic-task-completion", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
