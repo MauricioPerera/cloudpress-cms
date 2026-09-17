@@ -23,6 +23,24 @@ await database.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,
 await database.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(runId, taskId, 1, "running", 3, stamp, stamp);
 await database.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), runId, 1, "cloudpress_create_draft", "reversible", "planned", stamp, stamp);
 const headers = { Authorization: `Bearer ${raw}`, "content-type": "application/json" }, request = (body) => new Request("https://cms.example/api/admin/agent-execution", { method: "POST", headers, body: JSON.stringify(body) });
+const mediaKeys = new Set(["media/agent-image.png"]);
+const executionEnv = { DB, MEDIA: { async head(key) { return mediaKeys.has(key) ? { key } : null; } } };
+async function runningStep(tool, input = {}) {
+  const id = crypto.randomUUID(), run = crypto.randomUUID();
+  await database.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(id, crypto.randomUUID(), "reader-agent", 1, `Verificar ${tool}`, "[]", JSON.stringify({ classification: "public" }), "{}", "running", stamp, stamp);
+  await database.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(run, id, 1, "running", 3, stamp, stamp);
+  await database.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,input_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), run, 1, tool, "reversible", "planned", JSON.stringify(input), stamp, stamp);
+  const started = await onRequestPost({ request: request({ action: "start_step", taskId: id, ordinal: 1 }), env: executionEnv });
+  assert.equal(started.status, 200, `${tool} debe poder iniciar un paso de verificación.`);
+  return { id, run };
+}
+async function finishVerified(task, result) {
+  const response = await onRequestPost({ request: request({ action: "finish_step", taskId: task.id, ordinal: 1, outcome: { result, verification: { verified: true, check: "estado persistido" } } }), env: executionEnv });
+  assert.equal(response.status, 200, "El resultado persistido debe concluir el paso.");
+  const verification = JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(task.run).verification_json);
+  assert.equal(verification.source, "server-state", "La evidencia de la herramienta reversible procede del servidor.");
+  return verification.evidence;
+}
 const started = await onRequestPost({ request: request({ action: "start_step", taskId, ordinal: 1 }), env: { DB } });
 assert.equal(started.status, 200, "La credencial puede iniciar únicamente un paso de su tarea.");
 const resumed = await onRequestPost({ request: request({ action: "start_step", taskId, ordinal: 1 }), env: { DB } });
@@ -53,6 +71,21 @@ await database.prepare("UPDATE plugin_installations SET status='disabled' WHERE 
 const pluginCompleted = await onRequestPost({ request: request({ action: "finish_step", taskId: pluginTaskId, ordinal: 1, outcome: { result: { id: "cloudpress-commerce", status: "disabled" }, verification: { verified: true, check: "estado D1 confirmado" } } }), env: { DB } });
 assert.equal(pluginCompleted.status, 200, "Un estado de plugin comprobado en D1 se acepta.");
 assert.equal(JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(pluginRunId).verification_json).evidence.type, "d1_plugin_state", "La evidencia de plugin procede del estado persistido.");
+const coreTerm = database.prepare("INSERT INTO taxonomy_terms(type,name,slug) VALUES(?,?,?)").run("category", "Noticias", "noticias").lastInsertRowid;
+assert.equal((await finishVerified(await runningStep("cloudpress_manage_navigation", { resource: "taxonomy" }), { id: Number(coreTerm) })).type, "d1_taxonomy_state", "Las taxonomías de navegación se verifican en D1.");
+const menu = database.prepare("INSERT INTO menu_items(label,url,position) VALUES(?,?,?)").run("Inicio", "/", 1).lastInsertRowid;
+assert.equal((await finishVerified(await runningStep("cloudpress_manage_navigation", { resource: "menu" }), { id: Number(menu) })).type, "d1_menu_state", "Los menús se verifican en D1.");
+assert.equal((await finishVerified(await runningStep("cloudpress_manage_terms", { scope: "core" }), { id: Number(coreTerm) })).type, "d1_taxonomy_state", "Los términos base se verifican en D1.");
+await database.prepare("INSERT INTO plugin_terms(plugin_id,taxonomy_id,name,slug,parent_id) VALUES(?,?,?,?,?)").run("cloudpress-commerce", "product-category", "Oferta", "oferta", null);
+const pluginTerm = database.prepare("SELECT id FROM plugin_terms WHERE plugin_id=? AND taxonomy_id=? AND slug=?").get("cloudpress-commerce", "product-category", "oferta").id;
+assert.equal((await finishVerified(await runningStep("cloudpress_manage_terms", { scope: "plugin", pluginId: "cloudpress-commerce", taxonomyId: "product-category" }), { id: pluginTerm })).type, "d1_plugin_term_state", "Los términos de plugins se verifican en D1.");
+await database.prepare("INSERT INTO content_meta(content_id,meta_key,value_json,updated_at) VALUES(?,?,?,?)").run(41, "cloudpress-commerce.sku", JSON.stringify("SKU-42"), stamp);
+assert.equal((await finishVerified(await runningStep("cloudpress_manage_meta", { scope: "content", entityId: 41, key: "cloudpress-commerce.sku", value: "SKU-42" }), { scope: "content", id: 41, key: "cloudpress-commerce.sku", value: "SKU-42" })).type, "d1_plugin_meta_state", "Los metadatos se verifican en D1.");
+await database.prepare("UPDATE plugin_installations SET status='enabled' WHERE plugin_id='cloudpress-commerce'").run();
+assert.equal((await finishVerified(await runningStep("cloudpress_install_plugin", { id: "cloudpress-commerce" }), { id: "cloudpress-commerce", status: "enabled" })).type, "d1_plugin_state", "Las instalaciones de plugin se verifican en D1.");
+await database.prepare("INSERT INTO media_metadata(media_key,title,alt_text,caption,description,creator,license,source_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run("media/agent-image.png", "Imagen", "alternativa", "", "", "", "", "", stamp, stamp);
+assert.equal((await finishVerified(await runningStep("cloudpress_upload_media"), { key: "media/agent-image.png" })).type, "r2_media_and_d1_metadata", "Las subidas de medios se verifican en R2 y D1.");
+assert.equal((await finishVerified(await runningStep("cloudpress_update_media_meta", { key: "media/agent-image.png" }), { key: "media/agent-image.png" })).type, "r2_media_and_d1_metadata", "Los metadatos de medios se verifican en R2 y D1.");
 const foreign = await onRequestPost({ request: request({ action: "start_step", taskId: crypto.randomUUID(), ordinal: 1 }), env: { DB } });
 assert.equal(foreign.status, 422, "La credencial no puede operar tareas de otro perfil o actor.");
 const sensitiveTaskId = crypto.randomUUID(), sensitiveRunId = crypto.randomUUID(), approvalId = crypto.randomUUID();
@@ -72,4 +105,4 @@ const sensitiveStep = database.prepare("SELECT result_json,verification_json FRO
 assert.deepEqual(JSON.parse(sensitiveStep.result_json), { deleted: "content", id: 41 }, "El resultado sensible persistido procede de la aprobación, no de la declaración del agente.");
 assert.equal(JSON.parse(sensitiveStep.verification_json).source, "server-approved-action", "La evidencia sensible identifica la ejecución A2F en el servidor.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "unified-business-tool-trace", "automatic-task-completion", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "unified-business-tool-trace", "automatic-task-completion", "sensitive-task-scoped-approval", "server-postcondition-verification", "reversible-tool-postcondition-coverage", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
