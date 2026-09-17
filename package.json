@@ -15,6 +15,7 @@
     "test:agent-capability": "node scripts/verify-agent-capability.mjs && node scripts/verify-agent-capability-management.mjs",
     "test:agent-os": "node scripts/verify-agent-os.mjs && node scripts/verify-agent-contracts.mjs && node scripts/verify-agent-execution.mjs",
     "test:agent-runtime": "node scripts/verify-agent-runtime.mjs",
+    "test:agent-task-builder": "node scripts/verify-agent-task-builder.mjs",
     "test:agent-runtime-migration": "node scripts/verify-agent-runtime-migration.mjs",
     "test:agent-governance-migration": "node scripts/verify-agent-governance-migration.mjs",
     "test:agent-quality-gate": "node scripts/verify-agent-quality-gate.mjs",
@@ -37,7 +38,7 @@
     "test:admin-ui-confirmation-flow": "node scripts/verify-admin-ui-confirmation-flow.mjs",
     "test:schema": "node scripts/verify-schema-contract.mjs",
     "test:syntax": "node scripts/check-syntax.mjs",
-    "test": "npm run webmcp:build && npm run plugins:build && npm run openapi:build && npm run plugins:validate && npm run test:plugin-host && npm run test:public-plugin-api && npm run test:plugin-admin-ui && npm run test:plugin-boundaries && npm run test:openapi && npm run test:api-errors && npm run test:admin-ui-confirmation-flow && npm run test:http-guards && npm run test:approvals && npm run test:agent-capability && npm run test:agent-os && npm run test:agent-runtime && npm run test:agent-runtime-migration && npm run test:agent-governance-migration && npm run test:agent-quality-gate && npm run test:roles && npm run test:core-content-types && npm run test:admin-subpage-ui && npm run test:password-hardening && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:scheduler && npm run test:d1-migrate && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
+    "test": "npm run webmcp:build && npm run plugins:build && npm run openapi:build && npm run plugins:validate && npm run test:plugin-host && npm run test:public-plugin-api && npm run test:plugin-admin-ui && npm run test:plugin-boundaries && npm run test:openapi && npm run test:api-errors && npm run test:admin-ui-confirmation-flow && npm run test:http-guards && npm run test:approvals && npm run test:agent-capability && npm run test:agent-os && npm run test:agent-runtime && npm run test:agent-task-builder && npm run test:agent-runtime-migration && npm run test:agent-governance-migration && npm run test:agent-quality-gate && npm run test:roles && npm run test:core-content-types && npm run test:admin-subpage-ui && npm run test:password-hardening && npm run test:totp && npm run test:totp-recovery && npm run test:recovery-pdf && npm run test:scheduler && npm run test:d1-migrate && npm run test:fastwebmcp && npm run test:schema && npm run test:syntax"
   },
   "devDependencies": {
     "acorn": "^8.18.0",
