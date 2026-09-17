@@ -60,6 +60,12 @@ const retryTask = await onRequestPost({ request: request("/api/admin/agent-tasks
 const retryInfo = await retryTask.json();
 await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: retryInfo.task.id, state: "running" }), env });
 await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: retryInfo.task.id, ordinal: 1 }), env });
+const pausedRun = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: retryInfo.task.id, state: "paused", reason: "supervisión" }), env });
+assert.equal(pausedRun.status, 200, "Un supervisor puede pausar una tarea en ejecución.");
+const resumedRun = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "transition_task", taskId: retryInfo.task.id, state: "queued" }), env });
+assert.equal((await resumedRun.clone().json()).task.state, "running", "Reanudar devuelve la tarea al estado de ejecución aunque el cliente anterior envíe queued.");
+const resumedStep = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "start_step", taskId: retryInfo.task.id, ordinal: 1 }), env });
+assert.equal((await resumedStep.clone().json()).step.resumed, true, "El paso activo queda disponible después de reanudar.");
 const failed = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "fail_step", taskId: retryInfo.task.id, ordinal: 1, error: "El recurso remoto no estuvo disponible" }), env });
 assert.equal(failed.status, 200, "Un agente puede registrar un fallo trazable sin completar el paso.");
 const retried = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "retry_task", taskId: retryInfo.task.id }), env });
@@ -73,4 +79,4 @@ assert.equal(loaded.trace.some((event) => event.event === "step_verified"), true
 const listed = await onRequestGet({ request: request("/api/admin/agent-tasks"), env });
 assert.equal((await listed.json()).profiles.find((item) => item.id === "editor-agent").tools.length, 2, "La consulta devuelve las herramientas permitidas por perfil.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "pause-resume-active-step", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));

@@ -98,7 +98,7 @@ async function taskDetail(env, id) {
 const taskTransitions = new Map([
   ["queued", new Set(["running", "cancelled"])],
   ["running", new Set(["paused", "waiting_approval", "completed", "failed", "cancelled"])],
-  ["paused", new Set(["queued", "cancelled"])],
+  ["paused", new Set(["running", "cancelled"])],
   ["waiting_approval", new Set(["cancelled"])],
   ["failed", new Set(["cancelled"])],
 ]);
@@ -122,6 +122,12 @@ async function activeAgentStep(env, agent, taskId, ordinal, toolName, risk) {
 }
 
 async function transitionTask(env, actor, taskId, nextState, reason = "") {
+  // Older console clients used `queued` for Resume. Treat that request as a
+  // direct return to execution, preserving a running step and its quota.
+  if (nextState === "queued") {
+    const current = await env.DB.prepare("SELECT state FROM agent_tasks WHERE id=?").bind(taskId).first();
+    if (current?.state === "paused") nextState = "running";
+  }
   if (!TASK_STATES.has(nextState)) throw new Error("Estado de tarea inválido.");
   const { task, run } = await currentTaskRun(env, taskId);
   if (!taskTransitions.get(task.state)?.has(nextState)) throw new Error("Transición de tarea no permitida.");
