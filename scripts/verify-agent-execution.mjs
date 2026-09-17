@@ -1,0 +1,32 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import { bytesToBase64, sha256 } from "../functions/_shared.js";
+import { onRequestPost } from "../functions/api/admin/agent-execution.js";
+
+const database = new DatabaseSync(":memory:");
+database.exec(await readFile("schema.sql", "utf8"));
+const wrap = (sql, values = []) => ({
+  async first(column) { const row = database.prepare(sql).get(...values) ?? null; return column && row ? row[column] : row; },
+  async all() { return { results: database.prepare(sql).all(...values) }; },
+  async run() { const result = database.prepare(sql).run(...values); return { meta: { changes: Number(result.changes) } }; },
+});
+const DB = { prepare(sql) { return { bind(...values) { return wrap(sql, values); }, ...wrap(sql) }; }, async batch(statements) { return Promise.all(statements.map((statement) => statement.run())); } };
+await database.prepare("INSERT INTO users(id,username,password_hash,password_salt,role) VALUES(?,?,?,?,?)").run(1, "admin", "hash", "salt", "admin");
+await database.prepare("INSERT INTO agent_profiles(id,owner_id,label,purpose,status,max_active_runs,max_steps_per_run,data_policy_json) VALUES(?,?,?,?,?,?,?,?)").run("reader-agent", 1, "Lector", "Lectura trazable", "active", 1, 3, JSON.stringify({ maximumClassification: "public", allowSensitive: false }));
+await database.prepare("INSERT INTO agent_profile_tools(profile_id,tool_name,risk) VALUES(?,?,?)").run("reader-agent", "cloudpress_read_admin_state", "read");
+const raw = "e".repeat(44), hash = bytesToBase64(await sha256(raw)), stamp = new Date().toISOString();
+await database.prepare("INSERT INTO agent_capabilities(id,actor_id,profile_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?)").run("execution-capability", 1, "reader-agent", hash, new Date(Date.now() + 60_000).toISOString(), stamp);
+const taskId = crypto.randomUUID(), runId = crypto.randomUUID(), traceId = crypto.randomUUID();
+await database.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(taskId, traceId, "reader-agent", 1, "Leer estado", "[]", JSON.stringify({ classification: "public" }), "{}", "running", stamp, stamp);
+await database.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(runId, taskId, 1, "running", 3, stamp, stamp);
+await database.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), runId, 1, "cloudpress_read_admin_state", "read", "planned", stamp, stamp);
+const headers = { Authorization: `Bearer ${raw}`, "content-type": "application/json" }, request = (body) => new Request("https://cms.example/api/admin/agent-execution", { method: "POST", headers, body: JSON.stringify(body) });
+const started = await onRequestPost({ request: request({ action: "start_step", taskId, ordinal: 1 }), env: { DB } });
+assert.equal(started.status, 200, "La credencial puede iniciar únicamente un paso de su tarea.");
+const completed = await onRequestPost({ request: request({ action: "finish_step", taskId, ordinal: 1, outcome: { result: { items: 0 }, verification: { verified: true, check: "respuesta de herramienta" } } }), env: { DB } });
+assert.equal(completed.status, 200, "La credencial puede persistir un resultado verificado.");
+const foreign = await onRequestPost({ request: request({ action: "start_step", taskId: crypto.randomUUID(), ordinal: 1 }), env: { DB } });
+assert.equal(foreign.status, 422, "La credencial no puede operar tareas de otro perfil o actor.");
+database.close();
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "persisted-agent-step", "foreign-task-denied"] }));

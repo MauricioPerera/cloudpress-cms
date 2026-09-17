@@ -72,9 +72,7 @@ async function currentSessionUser(request, env) {
     .bind(tokenHash).first();
 }
 
-async function currentUser(request, env) {
-  const sessionUser = await currentSessionUser(request, env);
-  if (sessionUser) return sessionUser;
+async function currentAgentCapabilityUser(request, env) {
   // An LSFA companion holds this opaque capability in the OS credential store.
   // Browser JavaScript and agents never receive it from CloudPress.
   const authorization = request.headers.get("Authorization") || "";
@@ -84,6 +82,15 @@ async function currentUser(request, env) {
   const user = await env.DB.prepare("SELECT users.id, users.username, users.role, users.active, agent_capabilities.id AS agent_capability_id, agent_capabilities.profile_id AS agent_profile_id FROM agent_capabilities JOIN users ON users.id = agent_capabilities.actor_id WHERE agent_capabilities.token_hash = ? AND agent_capabilities.revoked_at IS NULL AND agent_capabilities.expires_at > datetime('now') AND users.active = 1")
     .bind(tokenHash).first();
   if (!user?.agent_profile_id) return null;
+  const profile = await env.DB.prepare("SELECT id FROM agent_profiles WHERE id=? AND owner_id=? AND status='active'").bind(user.agent_profile_id, user.id).first();
+  return profile ? { ...user, auth_method: "agent_capability" } : null;
+}
+
+async function currentUser(request, env) {
+  const sessionUser = await currentSessionUser(request, env);
+  if (sessionUser) return sessionUser;
+  const user = await currentAgentCapabilityUser(request, env);
+  if (!user) return null;
   const grants = await env.DB.prepare("SELECT tool_name,risk FROM agent_profile_tools JOIN agent_profiles ON agent_profiles.id=agent_profile_tools.profile_id WHERE agent_profile_tools.profile_id=? AND agent_profiles.owner_id=? AND agent_profiles.status='active'").bind(user.agent_profile_id, user.id).all();
   const contract = await agentToolAllows(request, grants.results.map((grant) => ({ name: grant.tool_name, risk: grant.risk })));
   return contract ? { ...user, agent_tool_name: contract.name, auth_method: "agent_capability" } : null;
@@ -156,4 +163,4 @@ function sanitizeHtml(value) {
   });
 }
 
-export { base64ToBytes, bytesToBase64, cookieValue, currentSessionUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };
+export { base64ToBytes, bytesToBase64, cookieValue, currentAgentCapabilityUser, currentSessionUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };

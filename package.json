@@ -13,7 +13,7 @@
     "test:http-guards": "node scripts/verify-http-guards.mjs",
     "test:approvals": "node scripts/verify-approvals.mjs",
     "test:agent-capability": "node scripts/verify-agent-capability.mjs && node scripts/verify-agent-capability-management.mjs",
-    "test:agent-os": "node scripts/verify-agent-os.mjs && node scripts/verify-agent-contracts.mjs",
+    "test:agent-os": "node scripts/verify-agent-os.mjs && node scripts/verify-agent-contracts.mjs && node scripts/verify-agent-execution.mjs",
     "test:password-hardening": "node scripts/verify-password-hardening.mjs",
     "test:totp": "node scripts/verify-totp.mjs",
     "test:totp-recovery": "node scripts/verify-totp-recovery.mjs",
