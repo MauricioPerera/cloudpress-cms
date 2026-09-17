@@ -78,6 +78,7 @@ assert.match(accessUi, /cloudpress-agent-profile/, "La vinculación debe pedir u
 assert.match(accessUi, /profileId: profileSelect\.value/, "La vinculación debe emitir una capacidad ligada al perfil seleccionado.");
 assert.match(accessUi, /cloudpress-link-agent/, "La vinculación debe requerir una acción explícita del administrador.");
 assert.match(accessUi, /Vincular agente local/, "La vinculación debe mostrar una confirmación comprensible antes de emitir acceso.");
+assert.match(accessUi, /DOMContentLoaded/, "La tarjeta de vinculación debe esperar al DOM cuando el middleware inserta scripts antes de la página.");
 
 database.close();
 console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "profile-bound-issuance-ui", "single-active-rotation", "safe-listing", "operational-revocation", "identity-mutation-denied", "modern-content-scope", "server-side-scope", "non-browser-companion"] }));
