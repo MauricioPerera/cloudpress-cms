@@ -28,6 +28,11 @@
     panel.querySelector('h2').textContent = title;
     panel.querySelector('p').textContent = message;
     const [cancel, accept] = panel.querySelectorAll('button');
+    // The legacy bridge handles only native-confirm controls. Mark both
+    // internal controls explicitly so an accepted modern dialog cannot open
+    // a second confirmation through event delegation.
+    cancel.dataset.cloudpressConfirm = 'modern';
+    accept.dataset.cloudpressConfirm = 'modern';
     const finish = result => { backdrop.remove(); resolve(result); };
     cancel.onclick = () => finish(kind === 'prompt' ? null : false);
     accept.onclick = () => finish(kind === 'prompt' ? panel.querySelector('input').value : true);

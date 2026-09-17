@@ -1,0 +1,10 @@
+{
+  "name": "CloudPress admin subpages",
+  "version": "alpha",
+  "source": "admin.html y admin-subpage.css",
+  "colors": {"primary":"#2271b1","primary-dark":"#135e96","navigation":"#1d2327","page":"#f0f0f1","line":"#dcdcde","muted":"#646970","danger":"#b32d2e","focus":"#72aee6","surface":"#ffffff"},
+  "typography": {"body":{"fontFamily":"system-ui,-apple-system,Segoe UI,sans-serif","fontSize":"14px","fontWeight":400,"lineHeight":1.45},"page-title":{"fontFamily":"system-ui,-apple-system,Segoe UI,sans-serif","fontSize":"25px","fontWeight":650,"lineHeight":1.2,"letterSpacing":"-0.02em"},"card-title":{"fontFamily":"system-ui,-apple-system,Segoe UI,sans-serif","fontSize":"17px","fontWeight":600,"lineHeight":1.3},"nav-label":{"fontFamily":"system-ui,-apple-system,Segoe UI,sans-serif","fontSize":"11px","fontWeight":700,"lineHeight":1.2,"letterSpacing":"0.06em"}},
+  "rounded":{"field":"2px","card":"6px"},
+  "spacing":{"control":"8px","form-gap":"16px","card":"20px","page":"32px"},
+  "components":{"sidebar":{"backgroundColor":"{colors.navigation}","textColor":"{colors.surface}","width":"248px"},"topbar":{"backgroundColor":"{colors.surface}","height":"58px"},"card":{"backgroundColor":"{colors.surface}","rounded":"{rounded.card}","padding":"{spacing.card}"},"field-grid":{"padding":"{spacing.form-gap}"},"primary-button":{"backgroundColor":"{colors.primary}","textColor":"{colors.surface}","rounded":"{rounded.card}","padding":"{spacing.control}"},"secondary-button":{"backgroundColor":"{colors.surface}","textColor":"{colors.primary}","rounded":"{rounded.card}","padding":"{spacing.control}"},"danger-button":{"backgroundColor":"{colors.surface}","textColor":"{colors.danger}","rounded":"{rounded.card}","padding":"{spacing.control}"}}
+}

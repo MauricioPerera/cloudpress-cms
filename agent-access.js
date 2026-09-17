@@ -14,6 +14,18 @@
     return token ? { "x-lsfa-channel-token": token } : {};
   };
 
+  const copy = async (value) => {
+    if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+    const field = document.createElement("textarea");
+    field.value = value; field.setAttribute("readonly", ""); field.style.position = "fixed"; field.style.opacity = "0";
+    document.body.append(field); field.select(); document.execCommand("copy"); field.remove();
+  };
+
+  const onboardingPrompt = () => {
+    const origin = location.origin;
+    return `Configura un agente local para CloudPress.\n\nSitio exacto: ${origin}\n\nEste prompt fue copiado desde Perfil después de que CloudPress validó una sesión administradora activa en este navegador. No pidas, recibas ni escribas usuario, contraseña, cookies, tokens ni códigos del autenticador. CloudPress seguirá comprobando la autorización en cada operación.\n\n1. Abre ${origin}/agent.html en un navegador compatible con WebMCP.\n2. Lee y sigue exactamente ${origin}/agent-setup/prompt.md.\n3. Si el agente local aún no está vinculado, vuelve a Perfil de CloudPress para completar la vinculación LSFA.\n4. Para cambios reversibles usa las herramientas de CloudPress; para acciones irreversibles espera el formulario local de confirmación.\n\nNo inventes rutas, permisos ni datos de autenticación.`;
+  };
+
   async function renderCapabilities(container) {
     const data = await api("/api/admin/agent-capabilities");
     container.replaceChildren();
@@ -54,9 +66,22 @@
     const section = document.createElement("section");
     section.id = "cloudpress-agent-access";
     section.className = "card";
-    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><p class=\"muted\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
-    const message = section.querySelector("p[role=status]");
+    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><button type=\"button\" id=\"cloudpress-copy-agent-prompt\">Copiar instrucciones para mi agente</button><p class=\"muted\" id=\"cloudpress-agent-prompt-status\" role=\"status\"></p><p class=\"muted\" id=\"cloudpress-companion-status\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
+    const message = section.querySelector("#cloudpress-companion-status");
     const list = section.querySelector(".agent-capability-list");
+    const copyButton = section.querySelector("#cloudpress-copy-agent-prompt");
+    const copyStatus = section.querySelector("#cloudpress-agent-prompt-status");
+    copyButton.addEventListener("click", async () => {
+      copyButton.disabled = true;
+      try {
+        await copy(onboardingPrompt());
+        copyStatus.textContent = "Instrucciones personalizadas copiadas. Pégalas en tu agente de IA.";
+      } catch {
+        copyStatus.textContent = "No se pudieron copiar las instrucciones.";
+      } finally {
+        copyButton.disabled = false;
+      }
+    });
     document.querySelector("main")?.append(section);
     await renderCapabilities(list);
     try {
@@ -72,8 +97,9 @@
         return;
       }
       message.textContent = "Vinculando el agente local con la sesión Admin existente…";
+      let capability = null;
       try {
-        const capability = await api("/api/admin/agent-capability", "POST");
+        capability = await api("/api/admin/agent-capability", "POST");
         const response = await fetch("http://127.0.0.1:9463/v1/cloudpress/agent-capabilities", {
           method: "POST", mode: "cors", credentials: "omit", headers: { "content-type": "application/json" },
           body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin: location.origin, capability: { id: capability.id, token: capability.token, expires_at: capability.expiresAt } }),
@@ -85,6 +111,11 @@
         message.textContent = "Agente local vinculado. La capacidad se guarda en el almacén seguro del sistema.";
         await renderCapabilities(list);
       } catch (error) {
+        // A failed handoff must not leave a usable bearer active for a week.
+        if (capability?.id) {
+          try { await api(`/api/admin/agent-capabilities/${encodeURIComponent(capability.id)}`, "DELETE"); }
+          catch { /* The user can still revoke it from the displayed capability list. */ }
+        }
         message.textContent = error.message || "No se pudo vincular el agente.";
       }
     } catch (error) {

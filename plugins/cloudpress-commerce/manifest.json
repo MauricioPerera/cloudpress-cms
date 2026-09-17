@@ -2,7 +2,7 @@
   "contractVersion": "cloudpress-plugin/v2",
   "id": "cloudpress-commerce",
   "name": "CloudPress Commerce",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Comercio de referencia para productos, clientes, inventario, carritos y pedidos de prueba.",
   "i18n": {
     "defaultLocale": "es",
@@ -53,7 +53,7 @@
     { "id": "create-order", "label": "Crear pedido de prueba", "scope": "site", "handler": "create-order", "capability": "buy-products", "inputSchema": { "type": "object", "properties": {} } }
   ],
   "routes": [
-    { "path": "/catalog", "methods": ["GET"], "handler": "catalog", "capability": "buy-products" },
+    { "path": "/catalog", "methods": ["GET"], "handler": "catalog", "capability": "buy-products", "public": true },
     { "path": "/cart", "methods": ["GET"], "handler": "cart", "capability": "buy-products" }
   ],
   "webhooks": [

@@ -125,7 +125,7 @@ export const reversibleTools = [
     title: "Activar o desactivar usuario",
     description: "Activa o desactiva una cuenta sin eliminarla. Úsala para retirar o devolver acceso de forma reversible.",
     inputSchema: z.object({ id: z.number().int().positive(), active: z.boolean() }),
-    async execute({ id, active }) { await api(`/api/admin/users/${id}`, "PATCH", { active }); visible(`Usuario ${id} ${active ? "activado" : "desactivado"}.`); return { id, active, reversible: true }; },
+    async execute({ id, active }) { await api(`/api/admin/users/${id}/active`, "POST", { active }); visible(`Usuario ${id} ${active ? "activado" : "desactivado"}.`); return { id, active, reversible: true }; },
   },
   {
     name: "cloudpress_manage_navigation",

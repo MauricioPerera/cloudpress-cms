@@ -1,14 +1,19 @@
-import { bytesToBase64, json, pbkdf2, takeRateLimit } from "../../../_shared.js";
-import { tokenHash } from "../../../_totp.js";
+import { bytesToBase64, equalBytes, json, pbkdf2, takeRateLimit } from "../../../_shared.js";
+import { recoveryCompanionProof, tokenHash } from "../../../_totp.js";
 
 export async function onRequestPost({ request, env, params }) {
   if (!await takeRateLimit(env, request, "totp-recovery-complete", 15 * 1000)) return json({ error: "Espera antes de intentar otra recuperación" }, 429, { "Retry-After": "15" });
   const token = String(request.headers.get("x-cloudpress-recovery-token") || "");
+  const proof = String(request.headers.get("x-cloudpress-lsfa-recovery-proof") || "");
   const body = await request.json().catch(() => null);
   const password = String(body?.password || "");
   if (!/^[0-9a-f-]{36}$/i.test(String(params.id || "")) || !token || password.length < 10) return json({ error: "Solicitud inválida o contraseña demasiado corta" }, 400);
   const recovery = await env.DB.prepare("SELECT id,user_id,state,expires_at FROM totp_recovery_requests WHERE id=? AND token_hash=?").bind(params.id, await tokenHash(token)).first();
   if (!recovery || recovery.state !== "verified" || Date.parse(recovery.expires_at) <= Date.now() || !recovery.user_id) return json({ error: "Solicitud de recuperación inválida o expirada" }, 400);
+  try {
+    const expected = await recoveryCompanionProof(env, recovery.id, token);
+    if (!proof || !equalBytes(new TextEncoder().encode(proof), new TextEncoder().encode(expected))) return json({ error: "Se requiere confirmación local LSFA" }, 403);
+  } catch { return json({ error: "No se pudo verificar la confirmación local" }, 503); }
   const claim = await env.DB.prepare("UPDATE totp_recovery_requests SET state='executing' WHERE id=? AND state='verified'").bind(recovery.id).run();
   if (!claim.meta.changes) return json({ error: "La solicitud ya fue usada" }, 409);
   try {

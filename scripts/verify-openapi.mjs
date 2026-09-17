@@ -1,0 +1,19 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+await promisify(execFile)(process.execPath, ["scripts/generate-openapi.mjs", "--check"]);
+const document = JSON.parse(await readFile("docs/openapi.json", "utf8"));
+assert.equal(document.openapi, "3.1.0");
+assert.equal(document.info.version, "1.1.0");
+for (const path of ["/api/content", "/api/admin/content", "/api/admin/content-types", "/api/admin/content-fields", "/api/plugins/{pluginId}/{path}", "/api/login", "/api/totp-recovery/prepare"]) assert.ok(document.paths[path], `Falta ${path} en OpenAPI.`);
+assert.equal(document.paths["/api/plugins/{pluginId}/{path}"].get.security.length, 0, "Las rutas públicas de plugin se deciden por manifiesto en servidor.");
+assert.equal(document.paths["/api/content"].get.parameters.find((item) => item.name === "pageSize")?.schema.maximum, 50, "Contenido debe documentar paginación acotada.");
+assert.equal(document.paths["/api/comments"].post.requestBody.content["application/json"].schema.$ref, "#/components/schemas/CommentSubmission");
+assert.ok(document.components.schemas.PublicContentCollection);
+assert.ok(document.components.schemas.ContentWrite);
+assert.equal(document.paths["/api/admin/content"].post["x-cloudpress-agent-access"], "scoped");
+assert.equal(document.paths["/api/admin/roles"].get["x-cloudpress-agent-access"], "none");
+assert.equal(document.paths["/api/admin/export"].get["x-cloudpress-agent-access"], "none");
+console.log(JSON.stringify({ ok: true, checks: ["openapi-sync", "public-content", "pagination-contract", "comment-schema", "agent-scope-contract", "modern-agent-content", "plugin-routes", "account-recovery"] }));

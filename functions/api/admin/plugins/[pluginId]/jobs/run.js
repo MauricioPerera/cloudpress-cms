@@ -2,7 +2,7 @@ import { json, requireAdmin } from "../../../../../_shared.js";
 import { auditSnapshot, createPluginContext, enabledPlugin, pluginAudit } from "../../../../../_plugins/host.js";
 
 export async function onRequestPost({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "plugins:manage"); if (!admin) return json({ error: "Se requiere permiso de plugins" }, 403);
   const pluginId = String(params.pluginId || ""), plugin = await enabledPlugin(env, pluginId); if (!plugin) return json({ error: "Plugin no disponible." }, 404);
   const job = await env.DB.prepare("SELECT * FROM plugin_jobs WHERE plugin_id=? AND status='queued' AND run_after<=? ORDER BY id LIMIT 1").bind(pluginId, new Date().toISOString()).first();
   if (!job) return json({ ok: true, job: null });

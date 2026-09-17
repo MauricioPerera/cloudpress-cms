@@ -3,7 +3,7 @@ import { pluginRegistry } from "../../../_plugins/registry.js";
 import { ensurePluginReleaseTable } from "../../../_plugins/host.js";
 
 export async function onRequestPatch({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "plugins:manage"); if (!admin) return json({ error: "Se requiere permiso de plugins" }, 403);
   const id = String(params.id || ""); if (!pluginRegistry.has(id)) return json({ error: "Plugin desconocido" }, 404);
   const body = await request.json().catch(() => null); const status = body?.status;
   if (!['enabled','disabled'].includes(status)) return json({ error: "Estado inválido" }, 400);
@@ -14,7 +14,7 @@ export async function onRequestPatch({ request, env, params }) {
 }
 
 export async function onRequestDelete({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "plugins:manage"); if (!admin) return json({ error: "Se requiere permiso de plugins" }, 403);
   const id = String(params.id || ""); if (!pluginRegistry.has(id)) return json({ error: "Plugin desconocido" }, 404);
   await ensurePluginReleaseTable(env);
   const installation = await env.DB.prepare("SELECT manifest_json FROM plugin_installations WHERE plugin_id=?").bind(id).first();

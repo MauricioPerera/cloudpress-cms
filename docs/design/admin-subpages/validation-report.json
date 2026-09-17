@@ -1,0 +1,8 @@
+{
+  "status": "PASSED_WITH_WARNINGS",
+  "deterministicValidator": {"status": "PASSED", "errors": [], "warnings": []},
+  "designMdLint": {"errors": 0, "warnings": 5, "warningsExplained": "primary-dark, page, line, muted y focus se usan en el CSS y el contrato, pero el linter no los considera referencias de componentes. Se conservan porque son tokens observados del shell y sus estados."},
+  "uiRegression": {"status": "PASSED", "command": "npm run test:admin-subpage-ui"},
+  "sourceScope": "admin.html y los flujos existentes de roles.html/content-types.html",
+  "date": "2026-09-16"
+}

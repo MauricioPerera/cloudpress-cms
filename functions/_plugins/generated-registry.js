@@ -8,7 +8,7 @@ export const generatedPluginRegistry = new Map([
   "contractVersion": "cloudpress-plugin/v2",
   "id": "cloudpress-commerce",
   "name": "CloudPress Commerce",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Comercio de referencia para productos, clientes, inventario, carritos y pedidos de prueba.",
   "i18n": {
     "defaultLocale": "es",
@@ -291,7 +291,8 @@ export const generatedPluginRegistry = new Map([
         "GET"
       ],
       "handler": "catalog",
-      "capability": "buy-products"
+      "capability": "buy-products",
+      "public": true
     },
     {
       "path": "/cart",
@@ -341,7 +342,7 @@ export const generatedPluginRegistry = new Map([
   "valid": true,
   "validatorVersion": "cloudpress-plugin-validator/1",
   "sourceHash": "sha256:c5fbf18a0920ad3bbd55f79a541c602f3052d61ca91af51f6146602ab96065c3",
-  "manifestHash": "sha256:0f750b10538869e01da4f9c6520b71373047b99669b242c341a9856fa9a76efe",
+  "manifestHash": "sha256:63af73d7829c11c0b3c72a65cf6892927e1aa2d5d68fc32910f3a6fb672daab3",
   "policy": "static-ast-no-execution"
 }, hooks: plugin0, module: plugin0 }],
   ["seo-basico", { manifest: {
@@ -374,7 +375,7 @@ export const generatedPluginReleaseRegistry = new Map([
   "contractVersion": "cloudpress-plugin/v2",
   "id": "cloudpress-commerce",
   "name": "CloudPress Commerce",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Comercio de referencia para productos, clientes, inventario, carritos y pedidos de prueba.",
   "i18n": {
     "defaultLocale": "es",
@@ -657,7 +658,8 @@ export const generatedPluginReleaseRegistry = new Map([
         "GET"
       ],
       "handler": "catalog",
-      "capability": "buy-products"
+      "capability": "buy-products",
+      "public": true
     },
     {
       "path": "/cart",
@@ -707,7 +709,7 @@ export const generatedPluginReleaseRegistry = new Map([
   "valid": true,
   "validatorVersion": "cloudpress-plugin-validator/1",
   "sourceHash": "sha256:c5fbf18a0920ad3bbd55f79a541c602f3052d61ca91af51f6146602ab96065c3",
-  "manifestHash": "sha256:0f750b10538869e01da4f9c6520b71373047b99669b242c341a9856fa9a76efe",
+  "manifestHash": "sha256:63af73d7829c11c0b3c72a65cf6892927e1aa2d5d68fc32910f3a6fb672daab3",
   "policy": "static-ast-no-execution"
 }, hooks: plugin0, module: plugin0 }],
     ["sha256:ee38449d4d0ee0f3211b48f256965cb97673311e0c2f089f9a07fa3c23d00fd5", { manifest: {

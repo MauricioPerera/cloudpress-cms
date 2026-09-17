@@ -109,7 +109,7 @@ async function plan(env, payload) {
 }
 
 export async function onRequestPost({ request, env }) {
-  const admin = await requireAdmin(request, env);
+  const admin = await requireAdmin(request, env, "import-export:manage");
   if (!admin) return json({ error: "Se requiere rol admin" }, 403);
   const payload = await request.json().catch(() => null);
   try {

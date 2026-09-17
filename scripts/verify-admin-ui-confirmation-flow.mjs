@@ -7,6 +7,8 @@ const admin = await readFile("admin.html", "utf8");
 assert.match(legacy, /button\.closest\('#cloudpress-ui'\)/, "El puente heredado no debe interceptar controles de CloudPressUI.");
 assert.match(legacy, /button\.dataset\.cloudpressConfirm === 'modern'/, "El puente heredado debe omitir acciones que ya tienen diálogo moderno.");
 assert.match(legacy, /CloudPressUI\.confirm/, "El puente heredado debe conservar confirmación para pantallas que aún usan diálogos nativos.");
+const ui = await readFile("admin-ui.js", "utf8");
+assert.match(ui, /accept\.dataset\.cloudpressConfirm = 'modern'/, "Los botones internos del diálogo moderno deben evitar la intercepción heredada.");
 assert.match(admin, /CloudPressUI\.confirm\(\{title:'Enviar contenido a la papelera'/, "El envío a Papelera debe usar el diálogo moderno.");
 assert.match(admin, /data-cloudpress-confirm="modern"/, "El botón de Papelera debe declararse como acción moderna.");
 

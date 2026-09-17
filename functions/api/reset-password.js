@@ -4,7 +4,7 @@ export async function onRequestPost({ request, env }) {
   const body = await request.json().catch(() => null);
   const token = String(body?.token || "");
   const password = String(body?.password || "");
-  if (!token || password.length < 10) return json({ error: "Token inválido o contraseña menor de 10 caracteres" }, 400);
+  if (!token || password.length < 12) return json({ error: "Token inválido o contraseña menor de 12 caracteres" }, 400);
   const tokenHash = bytesToBase64(await sha256(token));
   const reset = await env.DB.prepare("SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?").bind(tokenHash, new Date().toISOString()).first();
   if (!reset) return json({ error: "El enlace es inválido o ha expirado" }, 400);

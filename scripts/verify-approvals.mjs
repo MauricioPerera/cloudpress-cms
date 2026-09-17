@@ -36,7 +36,10 @@ assert.equal(stored.state, "pending");
 
 const executed = await executeApproval(env, prepared.requestId, prepared.executionToken);
 assert.equal(executed.status, 200);
-assert.deepEqual(await executed.json(), { ok: true, requestId: prepared.requestId, operation: "purge_content", state: "accepted", result: { deleted: "content", id: 1 } });
+const executedPayload = await executed.json();
+assert.deepEqual({ ok: executedPayload.ok, requestId: executedPayload.requestId, operation: executedPayload.operation, state: executedPayload.state, result: executedPayload.result }, { ok: true, requestId: prepared.requestId, operation: "purge_content", state: "accepted", result: { deleted: "content", id: 1 } });
+assert.match(executedPayload.correlationId, /^[0-9a-f-]{36}$/i, "Una respuesta con requestId operativo expone correlationId.");
+assert.equal(executed.headers.get("x-request-id"), executedPayload.correlationId);
 assert.equal(await DB.prepare("SELECT id FROM content_items WHERE id=?").bind(1).first(), null, "La acción aprobada debe ejecutarse exactamente una vez.");
 
 const replay = await executeApproval(env, prepared.requestId, prepared.executionToken);

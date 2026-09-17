@@ -1,8 +1,14 @@
 import { currentUser, json } from "../_shared.js";
+import { hasCorePermission } from "../_roles.js";
 import { auditSnapshot, createPluginContext, enabledPlugin, pluginAudit, validateInput } from "./host.js";
 
-const roleWeight = { user: 1, author: 2, admin: 3 };
-export async function allowed(env, user, pluginId, capability = "admin") { if (!user) return false; if (roleWeight[capability]) return roleWeight[user.role] >= roleWeight[capability]; return Boolean(await env.DB.prepare("SELECT 1 FROM plugin_role_capabilities WHERE plugin_id=? AND capability_id=? AND role=?").bind(pluginId, capability, user.role).first()); }
+export async function allowed(env, user, pluginId, capability = "admin") {
+  if (!user) return false;
+  if (capability === "admin") return hasCorePermission(env, user, "admin:access");
+  if (capability === "author") return hasCorePermission(env, user, "content:own");
+  if (capability === "user") return true;
+  return Boolean(await env.DB.prepare("SELECT 1 FROM plugin_role_capabilities WHERE plugin_id=? AND capability_id=? AND role=?").bind(pluginId, capability, user.role).first());
+}
 
 export async function executeAction({ request, env, pluginId, actionId }) {
   const user = await currentUser(request, env); const plugin = await enabledPlugin(env, pluginId);
@@ -15,5 +21,5 @@ export async function executeAction({ request, env, pluginId, actionId }) {
   const handler = plugin.module?.actions?.[action.handler];
   if (typeof handler !== "function") return json({ error: "El handler declarado no está disponible." }, 501);
   try { const result = await handler(createPluginContext(env, pluginId, user), input); await pluginAudit(env, pluginId, "action_succeeded", user.id, { actionId, input: JSON.parse(auditSnapshot(input)), result: JSON.parse(auditSnapshot(result)) }); return json({ ok: true, actionId, result }); }
-  catch (error) { await pluginAudit(env, pluginId, "action_failed", user?.id, { actionId, input: JSON.parse(auditSnapshot(input)), error: String(error?.message || "Error") }); return json({ error: String(error?.message || "La acción falló.") }, 422); }
+  catch (error) { await pluginAudit(env, pluginId, "action_failed", user?.id, { actionId, input: JSON.parse(auditSnapshot(input)), error: String(error?.message || "Error") }); return json({ error: "La operación del plugin no se pudo completar." }, 422); }
 }

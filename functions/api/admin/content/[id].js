@@ -2,6 +2,9 @@ import { json, requireAdmin, sanitizeHtml } from "../../../_shared.js";
 import { runPluginHook } from "../../../_plugins/runtime.js";
 import { renderBlocksDocument, replaceBlocksDocument } from "../../../_blocks.js";
 import { publicationState } from "../../../_scheduler.js";
+import { knownContentType } from "../../../_content-types.js";
+import { clearCustomFields, currentCustomFields, saveCustomFields, validateCustomFields } from "../../../_content-fields.js";
+import { currentAdvancedFields, saveAdvancedFields, validateAdvancedFields } from "../../../_advanced-fields.js";
 
 const validKind = (kind) => kind === "post" || kind === "page";
 const validStatus = (status) => status === "draft" || status === "published";
@@ -14,10 +17,7 @@ async function proposedContent(env, current, body) {
   if (body.kind !== undefined) { if (!validKind(body.kind)) throw new Error("Tipo inválido"); proposed.kind = body.kind; }
   if (body.contentType !== undefined) {
     const contentType = String(body.contentType);
-    if (!["post", "page"].includes(contentType)) {
-      const type = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first();
-      if (!type) throw new Error("Tipo de entrada no declarado por un plugin activo");
-    }
+    if (!await knownContentType(env, contentType)) throw new Error("Tipo de contenido no declarado");
     proposed.contentType = contentType;
   }
   if (body.title !== undefined) { proposed.title = String(body.title).trim().slice(0, 180); if (!proposed.title) throw new Error("El título es obligatorio"); }
@@ -42,7 +42,7 @@ async function replaceTerms(env, contentId, body) {
 }
 
 export async function onRequestPatch({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "content:manage"); if (!admin) return json({ error: "Se requiere permiso de contenido" }, 403);
   const id = Number(params.id);
   const body = await request.json().catch(() => null);
   if (!Number.isInteger(id) || id < 1 || !body) return json({ error: "Solicitud inválida" }, 400);
@@ -62,6 +62,19 @@ export async function onRequestPatch({ request, env, params }) {
   let next;
   try { next = applyPatch(proposed, before.patch); }
   catch (error) { return json({ error: error.message }, 422); }
+  if (!await knownContentType(env, next.contentType)) return json({ error: "El plugin generó un tipo de contenido no declarado" }, 422);
+  let customFields;
+  try {
+    const changedType = next.contentType !== current.content_type;
+    const existing = changedType ? {} : await currentCustomFields(env, id, next.contentType);
+    customFields = await validateCustomFields(env, next.contentType, body.customFields, { existing, requireAll: changedType || body.customFields !== undefined });
+  } catch (error) { return json({ error: error.message }, 422); }
+  let advancedFields;
+  try {
+    const changedType = next.contentType !== current.content_type;
+    const existing = changedType ? {} : await currentAdvancedFields(env, id, next.contentType);
+    advancedFields = await validateAdvancedFields(env, next.contentType, body.advancedFields, { existing, requireAll: changedType || body.advancedFields !== undefined });
+  } catch (error) { return json({ error: error.message }, 422); }
   const now = new Date();
   const hasPublishedAt = Object.prototype.hasOwnProperty.call(body, "publishedAt");
   let publishedAt = current.published_at;
@@ -84,14 +97,17 @@ export async function onRequestPatch({ request, env, params }) {
   const updates = []; const values = [];
   for (const [key, column] of fields) if (next[key] !== (key === "contentType" ? current.content_type : current[key])) { updates.push(`${column} = ?`); values.push(next[key]); }
   if ((publishedAt || null) !== (current.published_at || null)) { updates.push("published_at = ?"); values.push(publishedAt); }
-  const hasTerms = Array.isArray(body.termIds), hasPluginTerms = Array.isArray(body.pluginTermIds), hasBlockChange = body.blocks !== undefined, hasRawBodyChange = body.blocks === undefined && body.body !== undefined;
-  if (!updates.length && !hasTerms && !hasPluginTerms && !hasBlockChange && !hasRawBodyChange) return json({ error: "No hay cambios válidos" }, 400);
+  const hasTerms = Array.isArray(body.termIds), hasPluginTerms = Array.isArray(body.pluginTermIds), hasBlockChange = body.blocks !== undefined, hasRawBodyChange = body.blocks === undefined && body.body !== undefined, hasCustomFields = body.customFields !== undefined || next.contentType !== current.content_type, hasAdvancedFields = body.advancedFields !== undefined || next.contentType !== current.content_type;
+  if (!updates.length && !hasTerms && !hasPluginTerms && !hasBlockChange && !hasRawBodyChange && !hasCustomFields && !hasAdvancedFields) return json({ error: "No hay cambios válidos" }, 400);
   if (updates.length) {
     updates.push("updated_at = ?"); values.push(now.toISOString(), id);
     try { await env.DB.batch([snapshot(env.DB, current), env.DB.prepare(`UPDATE content_items SET ${updates.join(", ")} WHERE id = ?`).bind(...values)]); }
     catch { return json({ error: "No se pudo guardar la revisión; revisa que el slug sea único" }, 409); }
   }
   await replaceTerms(env, id, body);
+  if (next.contentType !== current.content_type) await clearCustomFields(env, id, current.content_type);
+  if (hasCustomFields && customFields.fields.length) await saveCustomFields(env, id, next.contentType, customFields.values);
+  if (hasAdvancedFields) await saveAdvancedFields(env, id, advancedFields.fields, advancedFields.values);
   if (hasBlockChange) await replaceBlocksDocument(env, id, renderedBlocks.document);
   else if (hasRawBodyChange) await replaceBlocksDocument(env, id, null);
   const persisted = await env.DB.prepare("SELECT id, kind, content_type, title, slug, excerpt, body, status FROM content_items WHERE id=?").bind(id).first();
@@ -100,7 +116,7 @@ export async function onRequestPatch({ request, env, params }) {
 }
 
 export async function onRequestDelete({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "content:manage"); if (!admin) return json({ error: "Se requiere permiso de contenido" }, 403);
   const id = Number(params.id);
   if (!Number.isInteger(id) || id < 1) return json({ error: "Solicitud inválida" }, 400);
   const current = await env.DB.prepare("SELECT id, kind, content_type, title, slug, excerpt, body, status, published_at FROM content_items WHERE id = ?").bind(id).first();

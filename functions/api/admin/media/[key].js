@@ -4,7 +4,7 @@ import { defaultMediaMetadata, deleteMediaMetadata, mediaMetadataByKey, normaliz
 const validName = (name) => Boolean(name) && !name.includes("/") && !name.includes("..");
 
 export async function onRequestGet({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "media:manage")) return json({ error: "Se requiere permiso de medios" }, 403);
   const name = String(params.key || "");
   if (!validName(name)) return json({ error: "Archivo inválido" }, 400);
   const key = `media/${name}`;
@@ -14,7 +14,7 @@ export async function onRequestGet({ request, env, params }) {
 }
 
 export async function onRequestPatch({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "media:manage")) return json({ error: "Se requiere permiso de medios" }, 403);
   const name = String(params.key || "");
   if (!validName(name)) return json({ error: "Archivo inválido" }, 400);
   const key = `media/${name}`;
@@ -29,7 +29,7 @@ export async function onRequestPatch({ request, env, params }) {
 }
 
 export async function onRequestDelete({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "media:manage")) return json({ error: "Se requiere permiso de medios" }, 403);
   const name = String(params.key || "");
   if (!validName(name)) return json({ error: "Archivo inválido" }, 400);
   const key = `media/${name}`;

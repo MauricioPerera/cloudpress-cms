@@ -8,4 +8,6 @@ assert.equal(/(?<!CloudPressUI\.)\b(alert|confirm|prompt)\(/.test(html), false, 
 for (const required of ["plugin-content-admin.js", "contentType="]) assert.ok(baseAdmin.includes(required) || navigation.includes(required), `La UI base debe incluir ${required}.`);
 for (const required of ["data-plugin-nav", "setInterval(bind,2000)"]) assert.ok(navigation.includes(required), `La navegación debe retirar en caliente ${required}.`);
 for (const required of ["/api/admin/content?contentType", "/api/admin/plugin-meta", "pluginTermIds", "/taxonomies/", "/revisions", "/api/admin/trash/", "CloudPressUI.confirm"]) assert.ok(pluginContent.includes(required), `El editor base de plugin debe incluir ${required}.`);
+const coreTypes = await readFile("content-types.html", "utf8");
+for (const required of ["dataset.cloudpressConfirm = 'modern'", "Tipo creado.", "Gestionar contenido"]) assert.ok(coreTypes.includes(required), `La administración de tipos propios debe incluir ${required}.`);
 console.log(JSON.stringify({ ok: true, checks: ["content-editor", "taxonomy-assignment", "trash-restore-purge", "actions", "webhook-rotation", "diagnostics", "privacy", "web-messages"] }));

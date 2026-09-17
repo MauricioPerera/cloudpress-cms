@@ -3,10 +3,13 @@ import { bytesToBase64, json, sha256, validEmail } from "../../_shared.js";
 const contentId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
 
 export async function onRequestGet({ request, env }) {
-  const id = contentId(new URL(request.url).searchParams.get("contentId"));
+  const url = new URL(request.url), id = contentId(url.searchParams.get("contentId"));
+  const page = Math.max(1, Math.min(1000, Number(url.searchParams.get("page")) || 1));
+  const pageSize = Math.max(1, Math.min(100, Number(url.searchParams.get("pageSize")) || 20));
   if (!id) return json({ error: "Contenido inválido" }, 400);
-  const comments = await env.DB.prepare("SELECT id, author_name, body, created_at FROM comments WHERE content_id = ? AND status = 'approved' ORDER BY created_at ASC LIMIT 100").bind(id).all();
-  return json({ comments: comments.results });
+  const comments = await env.DB.prepare("SELECT id, author_name, body, created_at FROM comments WHERE content_id = ? AND status = 'approved' ORDER BY created_at ASC LIMIT ? OFFSET ?").bind(id, pageSize, (page - 1) * pageSize).all();
+  const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM comments WHERE content_id = ? AND status = 'approved'").bind(id).all();
+  return json({ page, pageSize, total: total.results[0].total, comments: comments.results }, 200, { "Cache-Control": "public, max-age=60" });
 }
 
 export async function onRequestPost({ request, env }) {
@@ -22,7 +25,7 @@ export async function onRequestPost({ request, env }) {
   const client = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown";
   const fingerprint = bytesToBase64(await sha256(client));
   const previous = await env.DB.prepare("SELECT last_created_at FROM comment_rate_limits WHERE fingerprint = ?").bind(fingerprint).first();
-  if (previous && Date.now() - Date.parse(previous.last_created_at) < 60000) return json({ error: "Espera un minuto antes de enviar otro comentario" }, 429);
+  if (previous && Date.now() - Date.parse(previous.last_created_at) < 5 * 60 * 1000) return json({ error: "Espera cinco minutos antes de enviar otro comentario" }, 429, { "Retry-After": "300" });
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare("INSERT INTO comments(content_id, author_name, author_email, body, status, created_at, updated_at) VALUES(?, ?, ?, ?, 'pending', ?, ?)").bind(id, author, email || null, body, now, now),

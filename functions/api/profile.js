@@ -1,4 +1,4 @@
-import { base64ToBytes, bytesToBase64, currentUser, equalBytes, json, normalizeEmail, pbkdf2, validEmail } from "../_shared.js";
+import { base64ToBytes, bytesToBase64, currentUser, json, normalizeEmail, pbkdf2, validEmail, verifyPassword } from "../_shared.js";
 
 const validUsername = value => /^[a-z0-9_.-]{3,40}$/.test(String(value || "").trim().toLowerCase());
 
@@ -22,7 +22,7 @@ export async function onRequestPatch({ request, env }) {
     if (String(body.password).length < 10) return json({ error: "La contraseña debe tener al menos 10 caracteres" }, 400);
     const record = await env.DB.prepare("SELECT password_hash,password_salt FROM users WHERE id=?").bind(user.id).first();
     const current = String(body.currentPassword || "");
-    if (!record || !current || !equalBytes(await pbkdf2(current, base64ToBytes(record.password_salt)), base64ToBytes(record.password_hash))) return json({ error: "La contraseña actual no es correcta" }, 400);
+    if (!record || !current || !(await verifyPassword(current, base64ToBytes(record.password_salt), record.password_hash)).valid) return json({ error: "La contraseña actual no es correcta" }, 400);
     const salt = crypto.getRandomValues(new Uint8Array(16)), hash = await pbkdf2(String(body.password), salt);
     updates.push("password_hash=?", "password_salt=?"); values.push(bytesToBase64(hash), bytesToBase64(salt)); passwordChanged = true;
   }

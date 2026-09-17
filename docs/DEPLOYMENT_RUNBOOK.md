@@ -7,7 +7,7 @@ Este documento separa con claridad una instalación nueva de una actualización.
 1. Crea el proyecto de Cloudflare Pages desde tu fork y configura como directorio de salida `.` sin comando de build.
 2. Crea una base D1 y un bucket R2.
 3. En Pages, añade los bindings `DB` (D1) y `MEDIA` (R2).
-4. Configura TOTP_ENCRYPTION_KEY como una clave Base64 aleatoria de 32 bytes antes de permitir que alguien active Google Authenticator. RESEND_API_KEY y RESET_FROM sólo son necesarios si también habilitarás recuperación por correo. Nunca los añadas al repositorio.
+4. Configura TOTP_ENCRYPTION_KEY como una clave Base64 aleatoria de 32 bytes antes de permitir que alguien active Google Authenticator. Si habilitarás la recuperación TOTP mediante el companion LSFA, configura además LSFA_RECOVERY_SIGNING_KEY con un secreto aleatorio de al menos 32 caracteres y configura exactamente el mismo valor, fuera del repositorio, como CLOUDPRESS_LSFA_RECOVERY_SIGNING_KEY en el proceso local del companion. La recuperación se rechaza si falta su prueba HMAC. RESEND_API_KEY y RESET_FROM sólo son necesarios si también habilitarás recuperación por correo. Nunca los añadas al repositorio.
 5. Ejecuta una única vez el esquema completo contra la base nueva:
 
 ```powershell

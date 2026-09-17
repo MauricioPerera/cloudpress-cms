@@ -84,9 +84,16 @@ async function tokenHash(value) { return bytesToBase64(await sha256(value)); }
 function normalizeRecoveryCode(value) { return String(value || "").replace(/[\s-]/g, "").toUpperCase(); }
 function newRecoveryCode() { return base32Encode(crypto.getRandomValues(new Uint8Array(8))).slice(0, 12).match(/.{1,4}/g).join("-"); }
 async function recoveryCodeHash(value) { return tokenHash(`recovery-code:${normalizeRecoveryCode(value)}`); }
+async function recoveryCompanionProof(env, requestId, recoveryToken) {
+  const secret = String(env.LSFA_RECOVERY_SIGNING_KEY || "");
+  if (secret.length < 32) throw new Error("LSFA_RECOVERY_SIGNING_KEY no está configurada");
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const message = new TextEncoder().encode(`cloudpress-totp-recovery/v1\\n${requestId}\\n${recoveryToken}`);
+  return bytesToBase64(new Uint8Array(await crypto.subtle.sign("HMAC", key, message)));
+}
 function otpAuthUri({ issuer = "CloudPress", account, secret }) {
   const label = `${issuer}:${account}`;
   return `otpauth://totp/${encodeURIComponent(label)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
 }
 
-export { decryptTotpSecret, encryptTotpSecret, newOpaqueToken, newRecoveryCode, newTotpSecret, normalizeRecoveryCode, otpAuthUri, recoveryCodeHash, tokenHash, totpAt, verifyTotp };
+export { decryptTotpSecret, encryptTotpSecret, newOpaqueToken, newRecoveryCode, newTotpSecret, normalizeRecoveryCode, otpAuthUri, recoveryCodeHash, recoveryCompanionProof, tokenHash, totpAt, verifyTotp };

@@ -1,7 +1,7 @@
 import { json, requireAdmin } from "../../../../../_shared.js";
 
 export async function onRequestGet({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "content:manage")) return json({ error: "Se requiere permiso de contenido" }, 403);
   const contentId = Number(params.id);
   if (!Number.isInteger(contentId) || contentId < 1) return json({ error: "Solicitud inválida" }, 400);
   const exists = await env.DB.prepare("SELECT id FROM content_items WHERE id = ?").bind(contentId).first();

@@ -3,7 +3,7 @@ import { enabledPlugin, pluginAudit } from "../../../../../_plugins/host.js";
 
 function token() { const bytes = crypto.getRandomValues(new Uint8Array(32)); return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, ""); }
 export async function onRequestPost({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "plugins:manage"); if (!admin) return json({ error: "Se requiere permiso de plugins" }, 403);
   const pluginId = String(params.pluginId || ""), webhookId = String(params.webhookId || ""), plugin = await enabledPlugin(env, pluginId); if (!plugin) return json({ error: "Plugin no disponible." }, 404);
   const webhook = plugin.manifest.webhooks?.find((item) => item.id === webhookId); if (!webhook) return json({ error: "Webhook no declarado." }, 404);
   const value = token(), hash = bytesToBase64(await sha256(value)), now = new Date().toISOString();

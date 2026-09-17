@@ -4,7 +4,7 @@ const slugify = (value) => String(value || "").trim().toLowerCase().normalize("N
 async function taxonomy(env, pluginId, taxonomyId) { return env.DB.prepare("SELECT t.* FROM plugin_taxonomies t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.plugin_id=? AND t.taxonomy_id=?").bind(pluginId, taxonomyId).first(); }
 
 export async function onRequestPut({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "taxonomies:manage")) return json({ error: "Se requiere permiso de taxonomías" }, 403);
   const id = Number(params.termId), pluginId = String(params.pluginId || ""), taxonomyId = String(params.taxonomyId || "");
   if (!Number.isInteger(id) || id < 1) return json({ error: "Término inválido." }, 400);
   const definition = await taxonomy(env, pluginId, taxonomyId); if (!definition) return json({ error: "Taxonomía no disponible." }, 404);
@@ -20,7 +20,7 @@ export async function onRequestPut({ request, env, params }) {
 }
 
 export async function onRequestDelete({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "taxonomies:manage")) return json({ error: "Se requiere permiso de taxonomías" }, 403);
   const id = Number(params.termId), pluginId = String(params.pluginId || ""), taxonomyId = String(params.taxonomyId || "");
   if (!Number.isInteger(id) || id < 1) return json({ error: "Término inválido." }, 400);
   const result = await env.DB.prepare("DELETE FROM plugin_terms WHERE id=? AND plugin_id=? AND taxonomy_id=?").bind(id, pluginId, taxonomyId).run();

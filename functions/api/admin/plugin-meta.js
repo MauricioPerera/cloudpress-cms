@@ -7,7 +7,7 @@ function matches(type, value, schema = {}) {
   return false;
 }
 export async function onRequestGet({ request, env }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "content:manage")) return json({ error: "Se requiere permiso de contenido" }, 403);
   const url = new URL(request.url), scope = url.searchParams.get("scope"), id = Number(url.searchParams.get("id"));
   if (!['content','user'].includes(scope) || !Number.isInteger(id) || id < 1) return json({ error: "Entidad inválida" }, 400);
   const table = scope === 'content' ? 'content_meta' : 'user_meta', column = scope === 'content' ? 'content_id' : 'user_id';
@@ -15,7 +15,7 @@ export async function onRequestGet({ request, env }) {
   return json({ items: rows.results.map((row) => ({ key: row.meta_key, value: JSON.parse(row.value_json), updatedAt: row.updated_at })) }, 200, { "Cache-Control": "no-store" });
 }
 export async function onRequestPut({ request, env }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "content:manage")) return json({ error: "Se requiere permiso de contenido" }, 403);
   const body = await request.json().catch(() => null); const scope = body?.scope; const id = Number(body?.id); const key = String(body?.key || "");
   if (!['content','user'].includes(scope) || !Number.isInteger(id) || id < 1) return json({ error: "Entidad inválida" }, 400);
   const definition = await env.DB.prepare("SELECT m.* FROM plugin_meta_definitions m JOIN plugin_installations p ON p.plugin_id=m.plugin_id WHERE p.status='enabled' AND m.scope=? AND m.meta_key=?").bind(scope,key).first();

@@ -19,6 +19,8 @@ async function audit(db, id, action, actor, details = {}) { await db.prepare("IN
 async function conflicts(env, entry) {
   const collisions = [];
   for (const type of entry.manifest.contentTypes || []) {
+    const core = await env.DB.prepare("SELECT type_id FROM core_content_types WHERE type_id=? LIMIT 1").bind(type.id).first();
+    if (core) collisions.push({ kind: "contentType", id: type.id, source: "core" });
     const existing = await env.DB.prepare("SELECT plugin_id FROM plugin_content_types WHERE type_id=? AND plugin_id<>? LIMIT 1").bind(type.id, entry.manifest.id).first();
     if (existing) collisions.push({ kind: "contentType", id: type.id, pluginId: existing.plugin_id });
   }
@@ -30,7 +32,7 @@ async function conflicts(env, entry) {
 }
 
 export async function onRequestGet({ request, env }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "plugins:manage")) return json({ error: "Se requiere permiso de plugins" }, 403);
   await ensurePluginReleaseTable(env);
   const installed = await env.DB.prepare("SELECT plugin_id,status,installed_at,updated_at FROM plugin_installations ORDER BY plugin_id").all();
   const releases = await env.DB.prepare("SELECT plugin_id,version,source_hash,manifest_hash,validator_version,installed_at FROM plugin_releases WHERE is_current=1 ORDER BY plugin_id").all();
@@ -40,7 +42,7 @@ export async function onRequestGet({ request, env }) {
 }
 
 export async function onRequestPost({ request, env }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "plugins:manage"); if (!admin) return json({ error: "Se requiere permiso de plugins" }, 403);
   const body = await request.json().catch(() => null); const id = String(body?.id || ""); const requestedSourceHash = body?.sourceHash;
   if (requestedSourceHash !== undefined && (typeof requestedSourceHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(requestedSourceHash))) return json({ error: "sourceHash debe ser un hash SHA-256 atestado." }, 422);
   const current = pluginRegistry.get(id);
@@ -50,6 +52,12 @@ export async function onRequestPost({ request, env }) {
   if (!entry.verification?.valid || entry.verification?.validatorVersion !== "cloudpress-plugin-validator/1" || !/^sha256:[a-f0-9]{64}$/.test(entry.verification?.sourceHash || "")) return json({ error: "El plugin no tiene una atestación de validación local válida; vuelve a compilar y desplegar." }, 409);
   const verdict = validatePluginManifest(entry.manifest);
   if (!verdict.valid) { await audit(env.DB, id, "validation_failed", admin.id, { errors: verdict.errors }); return json({ error: "El contrato del plugin es inválido.", errors: verdict.errors }, 400); }
+  const declaredRoles = [...new Set((entry.manifest.capabilities || []).flatMap((capability) => capability.defaultRoles || []))];
+  if (declaredRoles.length) {
+    const knownRoles = new Set((await env.DB.prepare("SELECT id FROM roles").all()).results.map((role) => role.id));
+    const missingRoles = declaredRoles.filter((role) => !knownRoles.has(role));
+    if (missingRoles.length) return json({ error: "El plugin referencia roles que no existen.", missingRoles }, 422);
+  }
   await ensurePluginReleaseTable(env);
   const previous = await env.DB.prepare("SELECT source_hash FROM plugin_active_releases WHERE plugin_id=?").bind(id).first();
   const collision = await conflicts(env, entry);
@@ -58,7 +66,7 @@ export async function onRequestPost({ request, env }) {
   await env.DB.prepare("INSERT INTO plugin_installations(plugin_id,manifest_json,status,installed_by,installed_at,updated_at) VALUES(?,?, 'enabled', ?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET manifest_json=excluded.manifest_json,status='enabled',installed_by=excluded.installed_by,updated_at=excluded.updated_at").bind(id, JSON.stringify(entry.manifest), admin.id, now, now).run();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM plugin_content_types WHERE plugin_id=?").bind(id), env.DB.prepare("DELETE FROM plugin_meta_definitions WHERE plugin_id=?").bind(id), env.DB.prepare("DELETE FROM plugin_actions WHERE plugin_id=?").bind(id), env.DB.prepare("DELETE FROM plugin_taxonomies WHERE plugin_id=?").bind(id), env.DB.prepare("DELETE FROM plugin_admin_menus WHERE plugin_id=?").bind(id), env.DB.prepare("DELETE FROM plugin_capabilities WHERE plugin_id=?").bind(id),
-    ...(entry.manifest.contentTypes || []).map((x) => env.DB.prepare("INSERT INTO plugin_content_types(plugin_id,type_id,label,supports_json) VALUES(?,?,?,?)").bind(id,x.id,x.label,JSON.stringify(x.supports))),
+    ...(entry.manifest.contentTypes || []).map((x) => env.DB.prepare("INSERT INTO plugin_content_types(plugin_id,type_id,label,supports_json,public_api) VALUES(?,?,?,?,?)").bind(id,x.id,x.label,JSON.stringify(x.supports),x.publicApi ? 1 : 0)),
     ...(entry.manifest.contentMeta || []).map((x) => env.DB.prepare("INSERT INTO plugin_meta_definitions(plugin_id,scope,meta_key,value_type,required,schema_json) VALUES(?,?,?,?,?,?)").bind(id,'content',x.key,x.type,x.required?1:0,JSON.stringify(x.schema||{}))),
     ...(entry.manifest.userMeta || []).map((x) => env.DB.prepare("INSERT INTO plugin_meta_definitions(plugin_id,scope,meta_key,value_type,required,schema_json) VALUES(?,?,?,?,?,?)").bind(id,'user',x.key,x.type,x.required?1:0,JSON.stringify(x.schema||{}))),
     ...(entry.manifest.actions || []).map((x) => env.DB.prepare("INSERT INTO plugin_actions(plugin_id,action_id,label,entity_scope) VALUES(?,?,?,?)").bind(id,x.id,x.label,x.scope)),

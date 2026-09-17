@@ -12,6 +12,12 @@ Eres responsable de crear un plugin **compilado** para CloudPress. No inventes r
 4. `plugins/seo-basico/manifest.json` y `plugins/seo-basico/plugin.js`: ejemplo mínimo.
 5. `plugins/sdk/validator.js` y `scripts/validate-plugin.mjs`: validador local determinista de autor.
 
+## Límite de arquitectura
+
+CloudPress core sólo provee primitivas genéricas: contenido, campos, relaciones, roles, capacidades, media, auditoría, LSFA, API y el host seguro. Las reglas de negocio se implementan en plugins. Comercio (incluidos pagos, impuestos y envíos) y la edición multilingüe (traducciones, fallback y selector) son plugins, no cambios al core.
+
+Para esas necesidades usa tipos, taxonomías, metadatos, acciones, rutas, tareas, capacidades y almacenamiento namespaced del plugin. Si falta una primitiva reutilizable, propone una extensión mínima y compatible del contrato antes de modificar el núcleo. Nunca añadas al core una tabla, ruta o permiso con semántica de comercio, idiomas, SEO, formularios, reservas o membresías.
+
 ## Resultado obligatorio
 
 Para un plugin con id `<plugin-id>`, entrega estos cambios:
@@ -87,11 +93,11 @@ Reglas no negociables:
 - `i18n` es opcional: `defaultLocale` y cada locale usan `es` o `en-US`; `messages` traduce `name`, `description`, y etiquetas con claves como `contentTypes.product`, `actions.sync`, `menus.mi-menu`, `taxonomies.tema`, `capabilities.manage-x` o `webhooks.incoming`. El host sirve estas etiquetas con `?locale=en`.
 - Si declaras `content.beforeCreate` o `content.beforeUpdate`, declara también `content:transform`. Ambos pueden devolver `{ allow: true, patch: { ... } }` usando sólo `title`, `slug`, `excerpt`, `body` y `status`. Los demás hooks `before*` pueden devolver `{ allow: false }` para bloquear; los hooks `after*` son de observación y no revierten una operación ya persistida.
 - `settingsSchema`, si existe, debe ser un objeto serializado de máximo 4 KB.
-- `contentTypes` requiere `content-types:define`. En v3 cada `id` es global y debe usar `<plugin-id>--<tipo>`, por ejemplo `reservas--cita`; incluye `label` (máximo 80) y `supports` con una combinación de `title`, `body`, `excerpt`.
+- `contentTypes` requiere `content-types:define`. En v3 cada `id` es global y debe usar `<plugin-id>--<tipo>`, por ejemplo `reservas--cita`; incluye `label` (máximo 80) y `supports` con una combinación de `title`, `body`, `excerpt`. `publicApi` sólo acepta `true` si el contenido publicado de ese tipo es seguro para una audiencia anónima; por defecto es privado.
 - `contentMeta` requiere `content-meta:define`; `userMeta` requiere `user-meta:define`. En v3 cada `key` debe empezar exactamente por `<plugin-id>.`, usa `type` (`string`, `number`, `boolean` o `json`) y `required` booleano.
 - `actions` requiere `actions:register`. Cada acción tiene `id`, `label`, `scope`, `handler`, `capability` e `inputSchema`; en v3 el schema es un objeto estricto, con propiedades primitivas declaradas, `required` y `additionalProperties: false` cuando no se admitan campos extra. El handler vive en `export default { actions: { ... } }`.
 - `blocks` requiere `blocks:define` y contrato v2/v3. Cada bloque usa un id global `<plugin-id>--<bloque>`, `label`, `icon` opcional, `handler` e `attributes`. `attributes` es un schema estricto de propiedades primitivas, igual que `inputSchema`. El editor de CloudPress genera el inspector desde ese schema: no incluyas JavaScript de navegador ni UI remota. El handler vive en `export default { blocks: { ... } }`, recibe únicamente los atributos congelados y devuelve `{ html: "..." }` o un string HTML; el host lo sanea antes de guardarlo. Debe ser puro y determinista: no usa contexto, red, secretos ni almacenamiento.
-- `routes`, `tasks`, `menus`, `taxonomies`, `migrations`, `capabilities` y `webhooks` requieren sus permisos homónimos. Las rutas, acciones y menús se autorizan por rol base o capacidad declarada; las tareas se ejecutan mediante la cola namespaced del host. Cada webhook declara `id`, `label`, `path` y `handler`; su handler vive en `export default { webhooks: { ... } }` y recibe un token rotado por el administrador, nunca un secreto escrito en el manifiesto.
+- `routes`, `tasks`, `menus`, `taxonomies`, `migrations`, `capabilities` y `webhooks` requieren sus permisos homónimos. Las rutas, acciones y menús se autorizan por capacidad de núcleo o capacidad declarada; `defaultRoles` puede incluir cualquier identificador de rol que ya exista en CloudPress (por ejemplo `comprador` o `vendedor`). Una ruta sólo puede añadir `public: true` si todos sus métodos son `GET`; de otro modo exige autenticación. El host rechaza la instalación si el rol no existe; un plugin no crea roles ni eleva permisos de gestión. Las tareas se ejecutan mediante la cola namespaced del host. Cada webhook declara `id`, `label`, `path` y `handler`; su handler vive en `export default { webhooks: { ... } }` y recibe un token rotado por el administrador, nunca un secreto escrito en el manifiesto.
 
 Pide sólo los permisos mínimos. No declares metadatos, tipos o acciones que el plugin no vaya a usar.
 

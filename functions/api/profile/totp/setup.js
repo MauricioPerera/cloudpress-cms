@@ -1,4 +1,4 @@
-import { base64ToBytes, currentUser, equalBytes, json, pbkdf2 } from "../../../_shared.js";
+import { base64ToBytes, currentUser, json, verifyPassword } from "../../../_shared.js";
 import { encryptTotpSecret, newTotpSecret, otpAuthUri } from "../../../_totp.js";
 
 export async function onRequestPost({ request, env }) {
@@ -7,7 +7,7 @@ export async function onRequestPost({ request, env }) {
   const body = await request.json().catch(() => null);
   const currentPassword = String(body?.currentPassword || "");
   const record = await env.DB.prepare("SELECT password_hash,password_salt FROM users WHERE id=?").bind(user.id).first();
-  if (!record || !currentPassword || !equalBytes(await pbkdf2(currentPassword, base64ToBytes(record.password_salt)), base64ToBytes(record.password_hash))) return json({ error: "La contraseña actual no es correcta" }, 400);
+  if (!record || !currentPassword || !(await verifyPassword(currentPassword, base64ToBytes(record.password_salt), record.password_hash)).valid) return json({ error: "La contraseña actual no es correcta" }, 400);
   const existing = await env.DB.prepare("SELECT state FROM totp_credentials WHERE user_id=?").bind(user.id).first();
   if (existing?.state === "active") return json({ error: "El autenticador ya está activo." }, 409);
   try {

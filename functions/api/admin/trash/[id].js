@@ -4,7 +4,7 @@ import { runPluginHook } from "../../../_plugins/runtime.js";
 const hookContent = (item, authorId) => ({ id: item.id, kind: item.kind, contentType: item.content_type, title: item.title, slug: item.slug, excerpt: item.excerpt, body: item.body, status: item.status, authorId });
 
 export async function onRequestPost({ request, env, params }) {
-  const admin = await requireAdmin(request, env); if (!admin) return json({ error: "Se requiere rol admin" }, 403);
+  const admin = await requireAdmin(request, env, "content:manage"); if (!admin) return json({ error: "Se requiere permiso de contenido" }, 403);
   const id = Number(params.id);
   if (!Number.isInteger(id) || id < 1) return json({ error: "Solicitud inválida" }, 400);
   const item = await env.DB.prepare("SELECT id,kind,content_type,title,slug,excerpt,body,status,trashed_from_status FROM content_items WHERE id=?").bind(id).first();
@@ -19,7 +19,7 @@ export async function onRequestPost({ request, env, params }) {
 }
 
 export async function onRequestDelete({ request, env, params }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "content:manage")) return json({ error: "Se requiere permiso de contenido" }, 403);
   const id = Number(params.id);
   if (!Number.isInteger(id) || id < 1) return json({ error: "Solicitud inválida" }, 400);
   const result = await env.DB.prepare("DELETE FROM content_items WHERE id=? AND status='trash'").bind(id).run();

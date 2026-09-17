@@ -16,12 +16,13 @@ export async function onRequest({ request, env, params }) {
     const handler = plugin.module?.webhooks?.[webhook.handler]; if (typeof handler !== "function") return json({ error: "Handler de webhook no disponible." }, 501);
     const body = await request.json().catch(() => null);
     try { const result = await handler(createPluginContext(env, pluginId, { id: null, role: "webhook" }), { body, request }); await pluginAudit(env, pluginId, "webhook_succeeded", null, { webhookId: webhook.id, path }); return json({ ok: true, result }); }
-    catch (error) { await pluginAudit(env, pluginId, "webhook_failed", null, { webhookId: webhook.id, path, error: String(error?.message || "Error") }); return json({ error: String(error?.message || "El webhook falló.") }, 422); }
+    catch (error) { await pluginAudit(env, pluginId, "webhook_failed", null, { webhookId: webhook.id, path, error: String(error?.message || "Error") }); return json({ error: "El webhook del plugin no se pudo procesar." }, 422); }
   }
   const route = plugin.manifest.routes?.find((item) => item.path === path && item.methods.includes(request.method));
   if (!route) return json({ error: "Ruta de plugin no declarada." }, 404);
-  const user = await currentUser(request, env); if (!await allowed(env, user, pluginId, route.capability)) return json({ error: "No tienes permiso para esta ruta." }, 403);
+  const user = route.public === true ? { id: null, role: "public" } : await currentUser(request, env);
+  if (route.public !== true && !await allowed(env, user, pluginId, route.capability)) return json({ error: "No tienes permiso para esta ruta." }, 403);
   const handler = plugin.module?.routes?.[route.handler]; if (typeof handler !== "function") return json({ error: "Handler de ruta no disponible." }, 501);
   try { const body = ["POST", "PATCH", "PUT"].includes(request.method) ? await request.json().catch(() => null) : null; const result = await handler(createPluginContext(env, pluginId, user), { request, body, params: new URL(request.url).searchParams }); await pluginAudit(env, pluginId, "route_succeeded", user.id, { path, method: request.method }); return json({ ok: true, result }); }
-  catch (error) { await pluginAudit(env, pluginId, "route_failed", user.id, { path, method: request.method, error: String(error?.message || "Error") }); return json({ error: String(error?.message || "La ruta falló.") }, 422); }
+  catch (error) { await pluginAudit(env, pluginId, "route_failed", user.id, { path, method: request.method, error: String(error?.message || "Error") }); return json({ error: "La ruta del plugin no se pudo completar." }, 422); }
 }

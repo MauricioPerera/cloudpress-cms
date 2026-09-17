@@ -31,6 +31,42 @@ CREATE TABLE IF NOT EXISTS agent_capabilities (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_capabilities_token ON agent_capabilities(token_hash);
 CREATE INDEX IF NOT EXISTS idx_agent_capabilities_actor ON agent_capabilities(actor_id, expires_at);
+CREATE TABLE IF NOT EXISTS agent_capability_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  capability_id TEXT NOT NULL REFERENCES agent_capabilities(id) ON DELETE CASCADE,
+  actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Los roles se almacenan como datos, no como una enumeración en el código.
+-- `management` identifica cuentas que pueden recibir permisos internos del CMS;
+-- `external` es para clientes, compradores, vendedores u otros actores de plugins.
+CREATE TABLE IF NOT EXISTS roles (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK(scope IN ('management','external')),
+  system INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK(permission IN ('admin:access','dashboard:access','content:manage','content:own','media:manage','comments:moderate','taxonomies:manage','navigation:manage','settings:manage','plugins:manage','users:manage','roles:manage','import-export:manage','scheduler:manage','sensitive:approve')),
+  PRIMARY KEY(role_id, permission)
+);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_permission ON role_permissions(permission, role_id);
+INSERT OR IGNORE INTO roles(id,label,scope,system) VALUES
+  ('admin','Administrador','management',1),
+  ('author','Autor','management',1),
+  ('user','Usuario','external',1);
+INSERT OR IGNORE INTO role_permissions(role_id,permission) VALUES
+  ('admin','dashboard:access'), ('admin','content:manage'), ('admin','content:own'),
+  ('admin','media:manage'), ('admin','comments:moderate'), ('admin','taxonomies:manage'),
+  ('admin','navigation:manage'), ('admin','settings:manage'), ('admin','plugins:manage'),
+  ('admin','users:manage'), ('admin','roles:manage'), ('admin','import-export:manage'),
+  ('admin','scheduler:manage'), ('admin','sensitive:approve'), ('author','content:own');
+CREATE INDEX IF NOT EXISTS idx_agent_capability_events_capability_created ON agent_capability_events(capability_id, created_at DESC);
 
 -- Registro operacional de las migraciones de CloudPress aplicadas mediante
 -- scripts/d1-migrate.mjs. No almacena secretos ni estado de la aplicación.
@@ -60,6 +96,52 @@ CREATE TABLE IF NOT EXISTS content_items (
 CREATE INDEX IF NOT EXISTS idx_content_kind_status ON content_items(kind, status);
 CREATE INDEX IF NOT EXISTS idx_content_author ON content_items(author_id);
 CREATE INDEX IF NOT EXISTS idx_content_type_status ON content_items(content_type, status);
+
+CREATE TABLE IF NOT EXISTS core_content_types (
+  type_id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  supports_json TEXT NOT NULL DEFAULT '["title","body","excerpt"]',
+  public_api INTEGER NOT NULL DEFAULT 0 CHECK(public_api IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS core_content_fields (
+  type_id TEXT NOT NULL REFERENCES core_content_types(type_id) ON DELETE CASCADE,
+  field_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  value_type TEXT NOT NULL CHECK(value_type IN ('string','number','boolean','date','reference')),
+  required INTEGER NOT NULL DEFAULT 0 CHECK(required IN (0,1)),
+  relation_type TEXT,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(type_id,field_id),
+  CHECK((value_type='reference' AND relation_type IS NOT NULL) OR (value_type<>'reference' AND relation_type IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_core_content_fields_type ON core_content_fields(type_id,field_id);
+
+CREATE TABLE IF NOT EXISTS custom_field_groups (
+  group_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_custom_field_groups_type ON custom_field_groups(content_type,active);
+CREATE TABLE IF NOT EXISTS custom_field_definitions (
+  group_id TEXT NOT NULL REFERENCES custom_field_groups(group_id) ON DELETE CASCADE,
+  field_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  value_type TEXT NOT NULL CHECK(value_type IN ('text','textarea','number','boolean','date','email','url','select','reference')),
+  required INTEGER NOT NULL DEFAULT 0 CHECK(required IN (0,1)),
+  relation_type TEXT,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(group_id,field_id),
+  CHECK((value_type='reference' AND relation_type IS NOT NULL) OR (value_type<>'reference' AND relation_type IS NULL))
+);
 
 CREATE TABLE IF NOT EXISTS login_lockouts (
   fingerprint TEXT PRIMARY KEY,
@@ -123,6 +205,14 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_content_status ON comments(content_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status, created_at);
+CREATE TABLE IF NOT EXISTS comment_moderation_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  comment_id INTEGER NOT NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL CHECK(action IN ('approved','deleted')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comment_moderation_events_comment ON comment_moderation_events(comment_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS comment_rate_limits (fingerprint TEXT PRIMARY KEY, last_created_at TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS action_rate_limits (
@@ -209,6 +299,7 @@ CREATE TABLE IF NOT EXISTS plugin_content_types (
   type_id TEXT NOT NULL,
   label TEXT NOT NULL,
   supports_json TEXT NOT NULL,
+  public_api INTEGER NOT NULL DEFAULT 0 CHECK(public_api IN (0,1)),
   PRIMARY KEY(plugin_id,type_id)
 );
 CREATE TABLE IF NOT EXISTS plugin_meta_definitions (
@@ -314,7 +405,7 @@ CREATE TABLE IF NOT EXISTS plugin_capabilities (
 CREATE TABLE IF NOT EXISTS plugin_role_capabilities (
   plugin_id TEXT NOT NULL,
   capability_id TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('admin','author','user')),
+  role TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   PRIMARY KEY(plugin_id, capability_id, role),
   FOREIGN KEY(plugin_id, capability_id) REFERENCES plugin_capabilities(plugin_id, capability_id) ON DELETE CASCADE
 );

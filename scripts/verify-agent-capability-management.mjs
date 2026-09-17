@@ -50,6 +50,14 @@ const hash = bytesToBase64(await sha256(raw));
 await database.prepare("INSERT INTO agent_capabilities(id,actor_id,token_hash,expires_at,created_at) VALUES(?,?,?,?,?)").run("scoped-capability", 1, hash, new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
 const auth = { Authorization: `Bearer ${raw}` };
 assert.equal((await currentUser(new Request("https://cms.example/api/admin/users", { headers: auth }), env))?.id, 1);
+assert.equal((await currentUser(new Request("https://cms.example/api/admin/content", { headers: auth }), env))?.id, 1, "La capacidad debe leer el endpoint editorial moderno.");
+assert.equal((await currentUser(new Request("https://cms.example/api/admin/content", { method: "POST", headers: auth }), env))?.id, 1, "La capacidad debe crear contenido en el endpoint editorial moderno.");
+assert.equal((await currentUser(new Request("https://cms.example/api/admin/content/2", { method: "PATCH", headers: auth }), env))?.id, 1, "La capacidad debe editar contenido en el endpoint editorial moderno.");
+assert.equal((await currentUser(new Request("https://cms.example/api/admin/content-types", { headers: auth }), env))?.id, 1, "La capacidad puede descubrir tipos, sin poder mutarlos.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/content-types", { method: "POST", headers: auth }), env), null, "La capacidad no puede redefinir contratos de contenido.");
+assert.equal(await currentUser(new Request("https://cms.example/api/admin/users/2", { method: "PATCH", headers: auth }), env), null, "Una capacidad no debe poder cambiar roles ni contraseñas de usuarios.");
+const activeUser = await currentUser(new Request("https://cms.example/api/admin/users/2/active", { method: "POST", headers: auth }), env);
+assert.equal(activeUser?.id, 1, "El cambio acotado de estado de usuario debe permanecer permitido.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/export", { headers: auth }), env), null, "La capacidad no debe leer exportaciones administrativas.");
 assert.equal(await currentUser(new Request("https://cms.example/api/admin/settings", { headers: auth }), env), null, "La capacidad no debe heredar futuros GET administrativos.");
 assert.equal((await currentUser(new Request("https://cms.example/api/admin/trash/7", { method: "POST", headers: auth }), env))?.id, 1, "Restaurar desde Papelera debe permanecer permitido.");
@@ -57,4 +65,4 @@ const companionMutation = await middleware({ request: new Request("https://cms.e
 assert.equal(companionMutation.status, 204, "El middleware debe aceptar al companion no-browser y dejar la autorización final a la ruta.");
 
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "single-active-rotation", "safe-listing", "operational-revocation", "server-side-scope", "non-browser-companion"] }));
+console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "single-active-rotation", "safe-listing", "operational-revocation", "identity-mutation-denied", "modern-content-scope", "server-side-scope", "non-browser-companion"] }));

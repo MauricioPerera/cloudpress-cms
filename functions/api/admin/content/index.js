@@ -2,17 +2,20 @@ import { json, requireAdmin, sanitizeHtml } from "../../../_shared.js";
 import { runPluginHook } from "../../../_plugins/runtime.js";
 import { renderBlocksDocument, saveBlocksDocument } from "../../../_blocks.js";
 import { publicationState } from "../../../_scheduler.js";
+import { knownContentType } from "../../../_content-types.js";
+import { currentCustomFields, saveCustomFields, validateCustomFields } from "../../../_content-fields.js";
+import { currentAdvancedFields, saveAdvancedFields, validateAdvancedFields } from "../../../_advanced-fields.js";
 
 const validKind = (kind) => kind === "post" || kind === "page";
 const validStatus = (status) => status === "draft" || status === "published";
 const slugify = (value) => String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 96);
 
 export async function onRequestGet({ request, env }) {
-  if (!await requireAdmin(request, env)) return json({ error: "Se requiere rol admin" }, 403);
+  if (!await requireAdmin(request, env, "content:manage")) return json({ error: "Se requiere permiso de contenido" }, 403);
   const url = new URL(request.url); const kind = url.searchParams.get("kind"); const status = url.searchParams.get("status"); const contentType = url.searchParams.get("contentType");
   if (kind && !validKind(kind)) return json({ error: "Tipo inválido" }, 400);
   if (status && status !== "trash") return json({ error: "Estado inválido" }, 400);
-  if (contentType && !["post","page"].includes(contentType)) { const known = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first(); if (!known) return json({ error: "Tipo de entrada no declarado por un plugin activo" }, 422); }
+  if (contentType && !await knownContentType(env, contentType)) return json({ error: "Tipo de contenido no declarado" }, 422);
   const filters = []; const values = [];
   if (kind) { filters.push("content_items.kind = ?"); values.push(kind); }
   if (contentType) { filters.push("content_items.content_type = ?"); values.push(contentType); }
@@ -24,12 +27,14 @@ export async function onRequestGet({ request, env }) {
     updated_at: String(item.updated_at || "").replace(/Z$/, ""),
     terms: (await env.DB.prepare("SELECT taxonomy_terms.id, taxonomy_terms.type, taxonomy_terms.name, taxonomy_terms.slug FROM content_terms JOIN taxonomy_terms ON taxonomy_terms.id = content_terms.term_id WHERE content_id = ? ORDER BY taxonomy_terms.type, taxonomy_terms.name").bind(item.id).all()).results,
     pluginTerms: (await env.DB.prepare("SELECT plugin_terms.id,plugin_terms.plugin_id,plugin_terms.taxonomy_id,plugin_terms.name,plugin_terms.slug FROM plugin_content_terms JOIN plugin_terms ON plugin_terms.id=plugin_content_terms.term_id JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_installations.status='enabled' AND plugin_content_terms.content_id=? ORDER BY plugin_terms.taxonomy_id,plugin_terms.name").bind(item.id).all()).results,
+    customFields: await currentCustomFields(env, item.id, item.content_type),
+    advancedFields: await currentAdvancedFields(env, item.id, item.content_type),
   })));
   return json({ items }, 200, { "Cache-Control": "no-store" });
 }
 
 export async function onRequestPost({ request, env }) {
-  const admin = await requireAdmin(request, env);
+  const admin = await requireAdmin(request, env, "content:manage");
   if (!admin) return json({ error: "Se requiere rol admin" }, 403);
   const body = await request.json().catch(() => null);
   let renderedBlocks = null;
@@ -41,10 +46,7 @@ export async function onRequestPost({ request, env }) {
   let slug = slugify(body?.slug || title);
   let status = body?.status || "draft";
   if (!validKind(kind) || !title || !slug || !validStatus(status)) return json({ error: "Datos de contenido inválidos" }, 400);
-  if (contentType !== "post" && contentType !== "page") {
-    const type = await env.DB.prepare("SELECT 1 FROM plugin_content_types t JOIN plugin_installations p ON p.plugin_id=t.plugin_id WHERE p.status='enabled' AND t.type_id=?").bind(contentType).first();
-    if (!type) return json({ error: "Tipo de entrada no declarado por un plugin activo" }, 422);
-  }
+  if (!await knownContentType(env, contentType)) return json({ error: "Tipo de contenido no declarado" }, 422);
   const submittedBody = renderedBlocks ? renderedBlocks.html : String(body?.body || "");
   const plugin = await runPluginHook(env, "content.beforeCreate", { kind, contentType, title, slug, status, excerpt: String(body?.excerpt || ""), body: submittedBody, authorId: admin.id });
   if (!plugin.allowed) return json({ error: plugin.error }, 422);
@@ -56,6 +58,13 @@ export async function onRequestPost({ request, env }) {
   status = transformed.status || "draft";
   if (!validKind(kind) || !title || !slug || !validStatus(status)) return json({ error: "El plugin generó contenido inválido" }, 422);
   contentType = String(transformed.contentType || contentType);
+  if (!await knownContentType(env, contentType)) return json({ error: "El plugin generó un tipo de contenido no declarado" }, 422);
+  let customFields;
+  try { customFields = await validateCustomFields(env, contentType, body?.customFields); }
+  catch (error) { return json({ error: error.message }, 422); }
+  let advancedFields;
+  try { advancedFields = await validateAdvancedFields(env, contentType, body?.advancedFields); }
+  catch (error) { return json({ error: error.message }, 422); }
   const now = new Date();
   const scheduledAt = body?.publishedAt ? new Date(body.publishedAt) : null;
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return json({ error: "Fecha de publicación inválida" }, 400);
@@ -70,6 +79,8 @@ export async function onRequestPost({ request, env }) {
     const pluginTermIds=[...new Set((Array.isArray(body?.pluginTermIds)?body.pluginTermIds:[]).map(Number).filter(Number.isInteger))];
     if(pluginTermIds.length) await env.DB.batch(pluginTermIds.map(id=>env.DB.prepare("INSERT OR IGNORE INTO plugin_content_terms(content_id,term_id) SELECT ?,plugin_terms.id FROM plugin_terms JOIN plugin_installations ON plugin_installations.plugin_id=plugin_terms.plugin_id WHERE plugin_terms.id=? AND plugin_installations.status='enabled'").bind(result.meta.last_row_id,id)));
     if (renderedBlocks) await saveBlocksDocument(env, result.meta.last_row_id, renderedBlocks.document);
+    if (customFields.fields.length) await saveCustomFields(env, result.meta.last_row_id, contentType, customFields.values);
+    if (advancedFields.fields.length) await saveAdvancedFields(env, result.meta.last_row_id, advancedFields.fields, advancedFields.values);
     await runPluginHook(env, "content.afterCreate", { id: result.meta.last_row_id, kind, title, slug, status, excerpt: String(transformed.excerpt || ""), body: String(transformed.body || ""), authorId: admin.id });
     return json({ ok: true, id: result.meta.last_row_id, scheduled: publication.scheduled, publishedAt: publication.publishedAt }, 201);
   } catch { return json({ error: "El slug ya está en uso" }, 409); }

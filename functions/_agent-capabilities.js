@@ -4,7 +4,7 @@ export async function issueAgentCapability(env, actorId, now = new Date()) {
   const rawToken = bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
   const tokenHash = bytesToBase64(await sha256(rawToken));
   const createdAt = now.toISOString();
-  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
   const id = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare("UPDATE agent_capabilities SET revoked_at=? WHERE actor_id=? AND revoked_at IS NULL").bind(createdAt, actorId),

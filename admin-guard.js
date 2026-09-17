@@ -14,7 +14,7 @@
   const required = root.dataset.guard || "admin";
   fetch("/api/me").then(async (response) => {
     const data = await response.json().catch(() => ({}));
-    const allowed = response.ok && data.user && (required === "session" || data.user.role === "admin");
+    const allowed = response.ok && data.user && (required === "session" || data.user.permissions?.adminAccess === true);
     if (!allowed) throw new Error("unauthorized");
     root.classList.add("authenticated");
   }).catch(() => {
