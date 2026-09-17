@@ -212,6 +212,17 @@ export const reversibleTools = [
     async execute({ id, status }) { await api(`/api/admin/plugins/${encodeURIComponent(id)}`, "PATCH", { status }); visible(`Plugin ${id} ${status === "enabled" ? "activado" : "desactivado"}.`); return { id, status, reversible: true }; },
   },
   {
+    name: "cloudpress_plugin_action",
+    title: "Ejecutar acción declarada por un plugin",
+    description: "Ejecuta sólo una acción cuyo manifiesto activo la haya autorizado explícitamente para agentes. Consulta primero plugin_schema para conocer su esquema. El core valida el plugin, la acción, la capacidad, el perfil, el paso activo y la traza; las acciones irreversibles no pueden declararse aquí.",
+    inputSchema: z.object({ pluginId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,47}$/), actionId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,47}$/), input: z.record(z.string(), z.unknown()) }).strict(),
+    async execute({ pluginId, actionId, input }) {
+      const data = await api(`/api/admin/plugins/${encodeURIComponent(pluginId)}/actions/${encodeURIComponent(actionId)}`, "POST", input);
+      visible(`Acción de plugin ejecutada: ${pluginId}/${actionId}.`);
+      return { pluginId, actionId, ...data };
+    },
+  },
+  {
     name: "cloudpress_upload_media",
     title: "Subir imagen a la biblioteca",
     description: "Carga una imagen ya generada localmente a la biblioteca de CloudPress cuando el usuario haya aprobado usarla. Acepta sólo un data URL Base64 PNG, JPG, GIF o WebP de hasta 10 MB, con metadatos editoriales opcionales, y devuelve la URL publicada; el archivo queda almacenado hasta que se elimine.",

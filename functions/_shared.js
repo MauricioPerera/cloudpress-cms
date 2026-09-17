@@ -179,4 +179,4 @@ function sanitizeHtml(value) {
   });
 }
 
-export { base64ToBytes, bytesToBase64, cookieValue, currentAgentCapabilityUser, currentSessionUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };
+export { base64ToBytes, bytesToBase64, cookieValue, currentAgentCapabilityUser, currentSessionUser, currentTaskScopedUser, currentUser, equalBytes, errorCodeForStatus, json, normalizeEmail, pbkdf2, requireAdmin, requireAuthor, requireBrowserAdmin, requireRoleManager, sanitizeHtml, sha256, takeRateLimit, validEmail, verifyPassword };

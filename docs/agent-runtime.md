@@ -22,6 +22,8 @@ El runner usa exclusivamente una capacidad opaca y revocable asociada al perfil.
 
 Los pasos de negocio continúan por `/api/admin/agent-execution`. Cada mutación requiere un paso previsto, una capacidad con alcance, postcondición persistida y evidencia. Las operaciones sensibles permanecen detrás del flujo A2F/LSFA; ni el runtime ni una delegación pueden omitirlo.
 
+Los plugins pueden declarar una acción como apta para agentes con `agent: { risk: "read" }` o `agent: { risk: "reversible" }`. El agente usa la única herramienta puente `cloudpress_plugin_action`; el core vuelve a exigir el manifiesto activo, la capacidad del plugin, el perfil que la permitió y el paso activo de la tarea. No existe una declaración de acción sensible: las operaciones irreversibles siguen el flujo A2F/LSFA.
+
 ## Planes DAG
 
 Cada paso puede declarar `dependsOn` con ordinales anteriores. Si se omite, conserva el comportamiento secuencial anterior. El servidor rechaza ciclos o referencias futuras antes de persistir el plan. Las ramas cuyas dependencias ya terminaron se pueden iniciar de forma independiente.

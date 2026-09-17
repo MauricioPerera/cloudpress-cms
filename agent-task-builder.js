@@ -21,12 +21,13 @@
     if (tool === "cloudpress_create_draft") return `<label class="field">Título<input ${name("title")} maxlength="180" required></label><label class="field">Slug opcional<input ${name("slug")} maxlength="96"></label><label class="field">Extracto<textarea ${name("excerpt")} maxlength="500"></textarea></label><label class="field">Contenido<textarea ${name("body")} maxlength="50000"></textarea></label>`;
     if (tool === "cloudpress_update_content") return `<label class="field">ID del contenido<input ${name("id")} type="number" min="1" required></label><label class="field">Nuevo título opcional<input ${name("title")} maxlength="180"></label><label class="field">Nuevo extracto opcional<textarea ${name("excerpt")} maxlength="500"></textarea></label><label class="field">Nuevo contenido opcional<textarea ${name("body")} maxlength="50000"></textarea></label>`;
     if (tool === "cloudpress_trash_content" || tool === "cloudpress_restore_content") return `<label class="field">ID del contenido<input ${name("id")} type="number" min="1" required></label>`;
+    if (tool === "cloudpress_plugin_action") return `<label class="field">Plugin<input ${name("pluginId")} pattern="[a-z0-9][a-z0-9-]{2,47}" required></label><label class="field">Acción declarada<input ${name("actionId")} pattern="[a-z0-9][a-z0-9-]{2,47}" required></label><label class="field">Entrada JSON<textarea ${name("input")} required placeholder='{"campo":"valor"}'></textarea></label><p class="muted">La acción debe aparecer con autorización de agente en el esquema del plugin activo.</p>`;
     return `<p class="muted">Esta herramienta requiere un plan preparado por un proveedor gobernado y no se puede enviar manualmente todavía.</p>`;
   };
   const render = () => {
     const steps = selected();
     configs.innerHTML = steps.length ? `<h3>Datos de ejecución</h3>${steps.map((step) => `<section class="task-step-card" data-tool="${esc(step.tool)}"><h4>Paso ${step.index + 1}: ${esc(step.tool)}</h4>${fields(step)}</section>`).join("")}` : "";
-    task.querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = steps.some((step) => !["cloudpress_read_admin_state", "cloudpress_create_draft", "cloudpress_update_content", "cloudpress_trash_content", "cloudpress_restore_content"].includes(step.tool)); });
+    task.querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = steps.some((step) => !["cloudpress_read_admin_state", "cloudpress_create_draft", "cloudpress_update_content", "cloudpress_trash_content", "cloudpress_restore_content", "cloudpress_plugin_action"].includes(step.tool)); });
   };
   const value = (index, field) => task.querySelector(`[data-step-${index}-${field}]`)?.value;
   const plan = () => selected().map((step) => {
@@ -37,6 +38,7 @@
     if (step.tool === "cloudpress_update_content") input = { operation: "update_content", id: Number(value(step.index, "id")), title: value(step.index, "title"), excerpt: value(step.index, "excerpt"), body: value(step.index, "body") };
     if (step.tool === "cloudpress_trash_content") input = { operation: "trash_content", id: Number(value(step.index, "id")) };
     if (step.tool === "cloudpress_restore_content") input = { operation: "restore_content", id: Number(value(step.index, "id")) };
+    if (step.tool === "cloudpress_plugin_action") { try { input = { pluginId: value(step.index, "pluginId"), actionId: value(step.index, "actionId"), input: JSON.parse(value(step.index, "input") || "") }; } catch { throw new Error("La entrada JSON de la acción de plugin no es válida."); } }
     return { tool: step.tool, risk: step.risk, preconditions: { authorized: true }, expected, input };
   });
   task.addEventListener("change", render);

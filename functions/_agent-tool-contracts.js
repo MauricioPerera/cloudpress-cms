@@ -23,6 +23,10 @@ export const toolContracts = Object.freeze([
   { name: "cloudpress_set_plugin_state", risk: "reversible", method: "PATCH", paths: [new RegExp(`^/api/admin/plugins/${plugin}$`)] },
   { name: "cloudpress_upload_media", risk: "reversible", method: "POST", paths: [/^\/api\/admin\/media-agent$/] },
   { name: "cloudpress_update_media_meta", risk: "reversible", method: "PATCH", paths: [/^\/api\/admin\/media\/[^/]+$/] },
+  // Plugins opt in per action in their signed manifest. The generic route is
+  // still constrained to one declared action and the active task step.
+  { name: "cloudpress_plugin_action", risk: "read", method: "POST", paths: [new RegExp(`^/api/admin/plugins/${plugin}/actions/${plugin}$`)] },
+  { name: "cloudpress_plugin_action", risk: "reversible", method: "POST", paths: [new RegExp(`^/api/admin/plugins/${plugin}/actions/${plugin}$`)] },
   { name: "cloudpress_sensitive_action", risk: "sensitive", method: "POST", paths: [/^\/api\/admin\/approvals$/] },
 ]);
 
