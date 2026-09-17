@@ -31,6 +31,11 @@ await database.prepare("INSERT INTO agent_capabilities(id,actor_id,token_hash,ex
 const env = { DB };
 const cookie = { Cookie: `session=${session}` };
 
+const legacyResponse = await list({ request: new Request("https://cms.example/api/admin/agent-capabilities", { headers: cookie }), env });
+const legacy = await legacyResponse.json();
+assert.equal(legacy.capabilities.find((item) => item.id === "old-capability")?.status, "invalid_profile", "Una credencial heredada sin perfil no debe mostrarse como acceso activo.");
+assert.equal(legacy.capabilities.find((item) => item.id === "old-capability")?.revocable, true, "Una credencial heredada todavía debe poder revocarse.");
+
 const bearerDenied = await issue({ request: new Request("https://cms.example/api/admin/agent-capability", { method: "POST", headers: { Authorization: `Bearer ${"A".repeat(44)}` } }), env });
 assert.equal(bearerDenied.status, 403, "Una capacidad no puede emitir otras capacidades.");
 
@@ -71,6 +76,8 @@ assert.equal(companionMutation.status, 204, "El middleware debe aceptar al compa
 const accessUi = await readFile("agent-access.js", "utf8");
 assert.match(accessUi, /cloudpress-agent-profile/, "La vinculación debe pedir un perfil concreto.");
 assert.match(accessUi, /profileId: profileSelect\.value/, "La vinculación debe emitir una capacidad ligada al perfil seleccionado.");
+assert.match(accessUi, /cloudpress-link-agent/, "La vinculación debe requerir una acción explícita del administrador.");
+assert.match(accessUi, /Vincular agente local/, "La vinculación debe mostrar una confirmación comprensible antes de emitir acceso.");
 
 database.close();
 console.log(JSON.stringify({ ok: true, checks: ["browser-only-issuance", "profile-bound-issuance-ui", "single-active-rotation", "safe-listing", "operational-revocation", "identity-mutation-denied", "modern-content-scope", "server-side-scope", "non-browser-companion"] }));

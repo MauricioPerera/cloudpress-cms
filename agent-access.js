@@ -36,7 +36,7 @@
       const expiration = new Date(capability.expiresAt).toLocaleString();
       detail.textContent = `${capability.username} · perfil ${capability.profileId || "sin perfil"} · ${capability.status} · vence ${expiration}`;
       row.append(detail);
-      if (capability.status === "active") {
+      if (capability.revocable) {
         const revoke = document.createElement("button");
         revoke.type = "button";
         revoke.textContent = "Revocar este acceso";
@@ -58,6 +58,7 @@
       container.append(row);
     }
     if (!data.capabilities.length) container.textContent = "No hay accesos de agente registrados.";
+    return data.capabilities;
   }
 
   async function render() {
@@ -66,10 +67,11 @@
     const section = document.createElement("section");
     section.id = "cloudpress-agent-access";
     section.className = "card";
-    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><label class=\"field\">Perfil que recibirá el agente<select id=\"cloudpress-agent-profile\" required><option value=\"\">Cargando perfiles…</option></select></label><p class=\"muted\">La credencial sólo podrá usar las herramientas y la clasificación de datos del perfil elegido.</p><button type=\"button\" id=\"cloudpress-copy-agent-prompt\">Copiar instrucciones para mi agente</button><p class=\"muted\" id=\"cloudpress-agent-prompt-status\" role=\"status\"></p><p class=\"muted\" id=\"cloudpress-companion-status\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
+    section.innerHTML = "<h2>Acceso para agente local</h2><p>CloudPress usa el enrolamiento LSFA ya configurado en este equipo y tu sesión Admin actual. Nunca comparte tu contraseña ni la cookie del navegador.</p><label class=\"field\">Perfil que recibirá el agente<select id=\"cloudpress-agent-profile\" required><option value=\"\">Cargando perfiles…</option></select></label><p class=\"muted\">La credencial sólo podrá usar las herramientas y la clasificación de datos del perfil elegido.</p><button type=\"button\" id=\"cloudpress-link-agent\" disabled>Vincular agente local</button><button type=\"button\" id=\"cloudpress-copy-agent-prompt\">Copiar instrucciones para mi agente</button><p class=\"muted\" id=\"cloudpress-agent-prompt-status\" role=\"status\"></p><p class=\"muted\" id=\"cloudpress-companion-status\" role=\"status\">Comprobando el companion local…</p><h3>Accesos emitidos</h3><div class=\"agent-capability-list\"></div>";
     const message = section.querySelector("#cloudpress-companion-status");
     const list = section.querySelector(".agent-capability-list");
     const copyButton = section.querySelector("#cloudpress-copy-agent-prompt");
+    const linkButton = section.querySelector("#cloudpress-link-agent");
     const copyStatus = section.querySelector("#cloudpress-agent-prompt-status");
     const profileSelect = section.querySelector("#cloudpress-agent-profile");
     copyButton.addEventListener("click", async () => {
@@ -84,7 +86,8 @@
       }
     });
     document.querySelector("main")?.append(section);
-    await renderCapabilities(list);
+    const capabilities = await renderCapabilities(list);
+    let activeCapability = null;
     try {
       const profiles = (await api("/api/admin/agent-tasks")).profiles.filter((item) => item.status === "active");
       profileSelect.replaceChildren(...profiles.map((item) => new Option(`${item.label} · hasta ${item.dataPolicy.maximumClassification}`, item.id)));
@@ -92,6 +95,9 @@
         message.textContent = "Primero crea un perfil en Operaciones de agentes.";
         return;
       }
+      activeCapability = capabilities.find((item) => item.status === "active" && item.profileId && profiles.some((profile) => profile.id === item.profileId));
+      if (activeCapability) profileSelect.value = activeCapability.profileId;
+      linkButton.disabled = false;
     } catch (error) {
       message.textContent = error.message || "No se pudieron cargar los perfiles de agente.";
       return;
@@ -104,11 +110,18 @@
         message.textContent = "El companion está activo, pero aún no tiene un enrolamiento LSFA local.";
         return;
       }
-      if (status.linked && status.authorized) {
-        message.textContent = "Agente local vinculado. La capacidad se guarda en el almacén seguro del sistema.";
-        return;
-      }
+      if (status.linked && status.authorized && activeCapability) message.textContent = "Agente local vinculado. Puedes renovar el acceso o cambiar de perfil de forma explícita.";
+      else if (status.linked && status.authorized) message.textContent = "La credencial local no está ligada a un perfil activo de CloudPress. Vincúlala de nuevo antes de usar el agente.";
+      else message.textContent = "El companion está listo. Selecciona un perfil y vincula el agente local.";
+    } catch (error) {
+      message.textContent = error.message || "No se pudo comprobar el companion local.";
+    }
+
+    linkButton.addEventListener("click", async () => {
       if (!profileSelect.value) { message.textContent = "Selecciona el perfil que recibirá el agente local."; return; }
+      const approved = await window.CloudPressUI.confirm({ title: "Vincular agente local", message: "Se creará una capacidad revocable ligada exclusivamente al perfil seleccionado y se sustituirá cualquier acceso anterior de este usuario.", confirmLabel: "Vincular agente", destructive: false });
+      if (!approved) return;
+      linkButton.disabled = true;
       message.textContent = "Vinculando el agente local con el perfil seleccionado…";
       let capability = null;
       try {
@@ -130,10 +143,10 @@
           catch { /* The user can still revoke it from the displayed capability list. */ }
         }
         message.textContent = error.message || "No se pudo vincular el agente.";
+      } finally {
+        linkButton.disabled = false;
       }
-    } catch (error) {
-      message.textContent = error.message || "No se pudo comprobar el companion local.";
-    }
+    });
   }
 
   render().catch(() => {});

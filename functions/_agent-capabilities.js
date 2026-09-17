@@ -19,15 +19,19 @@ export async function issueAgentCapability(env, actorId, profileId, now = new Da
 export async function listAgentCapabilities(env) {
   const result = await env.DB.prepare("SELECT agent_capabilities.id,users.username,agent_capabilities.profile_id,agent_capabilities.expires_at,agent_capabilities.created_at,agent_capabilities.revoked_at FROM agent_capabilities JOIN users ON users.id=agent_capabilities.actor_id ORDER BY agent_capabilities.created_at DESC LIMIT 100").all();
   const now = Date.now();
-  return result.results.map((row) => ({
+  return result.results.map((row) => {
+    const status = row.revoked_at ? "revoked" : Date.parse(row.expires_at) <= now ? "expired" : row.profile_id ? "active" : "invalid_profile";
+    return {
     id: row.id,
     username: row.username,
     profileId: row.profile_id,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
-    status: row.revoked_at ? "revoked" : Date.parse(row.expires_at) <= now ? "expired" : "active",
-  }));
+    status,
+    revocable: !row.revoked_at && Date.parse(row.expires_at) > now,
+  };
+  });
 }
 
 export async function revokeAgentCapability(env, id, revokedAt = new Date().toISOString()) {
