@@ -20,12 +20,14 @@ function pathFor(file) {
 }
 
 function securityFor(path) {
+  if (["/api/admin/agent-execution", "/api/admin/agent-runtime"].includes(path)) return [{ agentCapability: [] }];
   if (path.startsWith("/api/admin/") || path.startsWith("/api/editor/") || path === "/api/profile" || path.startsWith("/api/profile/")) return [{ sessionCookie: [] }];
   return [];
 }
 
 function agentAccessFor(path, method) {
   const numeric = "{id}";
+  if (method === "post" && ["/api/admin/agent-execution", "/api/admin/agent-runtime"].includes(path)) return "capability-runtime";
   if (method === "get" && ["/api/admin/entries", "/api/admin/users", "/api/admin/taxonomies", "/api/admin/menus", "/api/admin/plugins", "/api/admin/media", "/api/admin/plugin-schema", "/api/admin/plugin-meta", "/api/admin/blocks", "/api/admin/content", "/api/admin/content-types", "/api/admin/content-fields"].includes(path)) return "scoped";
   if (method === "post" && ["/api/admin/entries", "/api/admin/taxonomies", "/api/admin/menus", "/api/admin/plugins", "/api/admin/media-agent", "/api/admin/approvals", "/api/admin/content"].includes(path)) return "scoped";
   if (method === "patch" && ["/api/admin/entries/{id}", "/api/admin/content/{id}"].includes(path)) return "scoped";
@@ -80,7 +82,8 @@ const document = {
   paths,
   components: {
     securitySchemes: {
-      sessionCookie: { type: "apiKey", in: "cookie", name: "session", description: "Sesión de CloudPress. Las rutas LSFA aceptan únicamente capacidades con alcance de ruta y método definido por el servidor." }
+      sessionCookie: { type: "apiKey", in: "cookie", name: "session", description: "Sesión de CloudPress para el panel administrativo." },
+      agentCapability: { type: "http", scheme: "bearer", bearerFormat: "CloudPress agent capability", description: "Capacidad opaca, revocable y vinculada a un perfil, conservada por el companion LSFA; nunca se expone al JavaScript del navegador." }
     },
     schemas: {
       Error: { type: "object", required: ["error", "code", "requestId"], properties: { error: { type: "string" }, code: { type: "string", enum: ["invalid_request", "unauthenticated", "forbidden", "not_found", "conflict", "validation_failed", "rate_limited", "internal_error", "request_failed"] }, requestId: { type: "string", format: "uuid", description: "Identificador seguro para correlación y soporte." } } },

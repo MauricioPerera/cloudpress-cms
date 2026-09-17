@@ -1,5 +1,6 @@
 import { currentAgentCapabilityUser, json } from "../../_shared.js";
 import { failStep, finishSensitiveStep, finishStep, requestTaskInput, startStep } from "../../_agent-os.js";
+import { syncAgentRuntimeTask } from "../../_agent-runtime.js";
 
 async function ownedTask(env, agent, taskId) {
   const task = await env.DB.prepare("SELECT id FROM agent_tasks WHERE id=? AND actor_id=? AND profile_id=?").bind(taskId, agent.id, agent.agent_profile_id).first();
@@ -70,11 +71,11 @@ export async function onRequestPost({ request, env }) {
   try {
     const taskId = String(body?.taskId || "");
     await ownedTask(env, agent, taskId);
-    if (body?.action === "start_step") return json({ step: await startStep(env, agent, taskId, Number(body.ordinal)) });
-    if (body?.action === "finish_step") return json({ step: await finishStep(env, agent, taskId, Number(body.ordinal), await verifiedOutcome(env, agent, taskId, Number(body.ordinal), body.outcome)) });
-    if (body?.action === "finish_sensitive_step") return json({ step: await finishSensitiveStep(env, agent, taskId, Number(body.ordinal), body.approvalRequestId, body.outcome) });
-    if (body?.action === "request_task_input") return json({ input: await requestTaskInput(env, agent, taskId, Number(body.ordinal), body) });
-    if (body?.action === "fail_step") return json({ step: await failStep(env, agent, taskId, Number(body.ordinal), body.error) });
+    if (body?.action === "start_step") { const step = await startStep(env, agent, taskId, Number(body.ordinal)); await syncAgentRuntimeTask(env, taskId); return json({ step }); }
+    if (body?.action === "finish_step") { const step = await finishStep(env, agent, taskId, Number(body.ordinal), await verifiedOutcome(env, agent, taskId, Number(body.ordinal), body.outcome)); await syncAgentRuntimeTask(env, taskId); return json({ step }); }
+    if (body?.action === "finish_sensitive_step") { const step = await finishSensitiveStep(env, agent, taskId, Number(body.ordinal), body.approvalRequestId, body.outcome); await syncAgentRuntimeTask(env, taskId); return json({ step }); }
+    if (body?.action === "request_task_input") { const input = await requestTaskInput(env, agent, taskId, Number(body.ordinal), body); await syncAgentRuntimeTask(env, taskId); return json({ input }); }
+    if (body?.action === "fail_step") { const step = await failStep(env, agent, taskId, Number(body.ordinal), body.error); await syncAgentRuntimeTask(env, taskId); return json({ step }); }
     return json({ error: "Acción de ejecución de agente inválida." }, 422);
   } catch (error) { return json({ error: error.message || "No se pudo registrar el paso." }, 422); }
 }

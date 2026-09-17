@@ -529,10 +529,82 @@
         "summary": "Implementado por functions/api/admin/agent-execution.js",
         "security": [
           {
-            "sessionCookie": []
+            "agentCapability": []
           }
         ],
-        "x-cloudpress-agent-access": "none",
+        "x-cloudpress-agent-access": "capability-runtime",
+        "parameters": [
+          []
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta en JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "403": {
+            "description": "Autorización insuficiente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "422": {
+            "description": "Entrada válida sintácticamente pero rechazada por reglas de negocio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/agent-runtime": {
+      "post": {
+        "operationId": "post__api_admin_agent_runtime",
+        "summary": "Implementado por functions/api/admin/agent-runtime.js",
+        "security": [
+          {
+            "agentCapability": []
+          }
+        ],
+        "x-cloudpress-agent-access": "capability-runtime",
         "parameters": [
           []
         ],
@@ -8930,7 +9002,13 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "session",
-        "description": "Sesión de CloudPress. Las rutas LSFA aceptan únicamente capacidades con alcance de ruta y método definido por el servidor."
+        "description": "Sesión de CloudPress para el panel administrativo."
+      },
+      "agentCapability": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "CloudPress agent capability",
+        "description": "Capacidad opaca, revocable y vinculada a un perfil, conservada por el companion LSFA; nunca se expone al JavaScript del navegador."
       }
     },
     "schemas": {

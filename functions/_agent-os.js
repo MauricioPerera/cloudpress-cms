@@ -151,6 +151,7 @@ async function createTask(env, actor, body) {
     const toolName = String(step.tool || ""), risk = String(step.risk || "read");
     statements.push(env.DB.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,preconditions_json,input_json,expected_json,created_at,updated_at) VALUES(?,?,?,?,?,'planned',?,?,?,?,?)").bind(crypto.randomUUID(), runId, index + 1, toolName, risk, JSON.stringify(step.preconditions || {}), JSON.stringify(step.input || {}), JSON.stringify(step.expected || {}), stamp, stamp));
   }
+  statements.push(env.DB.prepare("INSERT INTO agent_runtime_jobs(id,task_id,run_id,profile_id,provider_id,state,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?,?)").bind(crypto.randomUUID(), taskId, runId, profileId, "external-webmcp", stamp, stamp));
   await env.DB.batch(statements);
   await trace(env, { traceId, taskId, runId, actorId: actor.id, event: "task_created", details: { profileId, plannedSteps: plan.length, objective, admission, policyVersion: policy.version, snapshotHashes: { profile: hashes[0], plan: hashes[1], policy: hashes[2], toolContract: hashes[3] } } });
   return { id: taskId, runId, traceId, state: "queued", profileId, objective };
@@ -404,6 +405,7 @@ async function retryTask(env, actor, taskId) {
   const statements = [
     env.DB.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").bind(runId, taskId, run.attempt + 1, "queued", profile.maxStepsPerRun, stamp, stamp),
     env.DB.prepare("UPDATE agent_tasks SET state='queued',completed_at=NULL,updated_at=? WHERE id=? AND state='failed'").bind(stamp, taskId),
+    env.DB.prepare("INSERT INTO agent_runtime_jobs(id,task_id,run_id,profile_id,provider_id,state,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?,?)").bind(crypto.randomUUID(), taskId, runId, task.profile_id, "external-webmcp", stamp, stamp),
   ];
   if (previousSnapshot) statements.push(env.DB.prepare("INSERT INTO agent_execution_snapshots(id,task_id,run_id,policy_version,minimum_evidence,profile_snapshot_json,plan_snapshot_json,policy_snapshot_json,tool_contract_snapshot_json,profile_sha256,plan_sha256,policy_sha256,tool_contract_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), taskId, runId, previousSnapshot.policy_version, previousSnapshot.minimum_evidence, previousSnapshot.profile_snapshot_json, previousSnapshot.plan_snapshot_json, previousSnapshot.policy_snapshot_json, previousSnapshot.tool_contract_snapshot_json, previousSnapshot.profile_sha256, previousSnapshot.plan_sha256, previousSnapshot.policy_sha256, previousSnapshot.tool_contract_sha256, stamp));
   for (const [index, step] of plan.entries()) statements.push(env.DB.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,preconditions_json,input_json,expected_json,created_at,updated_at) VALUES(?,?,?,?,?,'planned',?,?,?,?,?)").bind(crypto.randomUUID(), runId, index + 1, step.tool, step.risk, JSON.stringify(step.preconditions || {}), JSON.stringify(step.input || {}), JSON.stringify(step.expected || {}), stamp, stamp));

@@ -14,6 +14,8 @@ assert.equal(document.paths["/api/comments"].post.requestBody.content["applicati
 assert.ok(document.components.schemas.PublicContentCollection);
 assert.ok(document.components.schemas.ContentWrite);
 assert.equal(document.paths["/api/admin/content"].post["x-cloudpress-agent-access"], "scoped");
+assert.deepEqual(document.paths["/api/admin/agent-runtime"].post.security, [{ agentCapability: [] }], "El runtime documenta la capacidad revocable, no una cookie administrativa.");
+assert.equal(document.paths["/api/admin/agent-runtime"].post["x-cloudpress-agent-access"], "capability-runtime");
 assert.equal(document.paths["/api/admin/roles"].get["x-cloudpress-agent-access"], "none");
 assert.equal(document.paths["/api/admin/export"].get["x-cloudpress-agent-access"], "none");
 console.log(JSON.stringify({ ok: true, checks: ["openapi-sync", "public-content", "pagination-contract", "comment-schema", "agent-scope-contract", "modern-agent-content", "plugin-routes", "account-recovery"] }));

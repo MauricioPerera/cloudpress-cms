@@ -1,4 +1,5 @@
 import { auditSnapshot, createPluginContext, enabledPlugin, pluginAudit } from "./_plugins/host.js";
+import { dispatchDueAgentTasks } from "./_agent-runtime.js";
 
 const SYSTEM_ACTOR = Object.freeze({ id: null, role: "system" });
 const max = (value, fallback = 25) => Math.min(Math.max(Number(value) || fallback, 1), 50);
@@ -65,6 +66,7 @@ export async function runScheduledWork(env, { now = new Date().toISOString(), li
   const recovered = await env.DB.prepare("UPDATE plugin_jobs SET status='queued',updated_at=? WHERE status='running' AND julianday(updated_at) <= julianday(?)")
     .bind(now, staleBefore).run();
   const published = await publishDueContent(env, { now });
+  const agents = await dispatchDueAgentTasks(env, { now, limit: size });
   const due = await env.DB.prepare("SELECT j.id,j.plugin_id,j.task_id,j.payload_json FROM plugin_jobs j JOIN plugin_installations p ON p.plugin_id=j.plugin_id WHERE j.status='queued' AND j.run_after<=? AND p.status='enabled' ORDER BY j.run_after,j.id LIMIT ?")
     .bind(now, size).all();
   const jobs = { completed: 0, failed: 0, skipped: 0 };
@@ -74,5 +76,5 @@ export async function runScheduledWork(env, { now = new Date().toISOString(), li
     else if (outcome.state === "failed") jobs.failed += 1;
     else jobs.skipped += 1;
   }
-  return { now, published, recovered: Number(recovered?.meta?.changes || 0), jobs };
+  return { now, published, recovered: Number(recovered?.meta?.changes || 0), agents, jobs };
 }
