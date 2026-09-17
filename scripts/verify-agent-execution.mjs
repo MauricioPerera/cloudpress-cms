@@ -59,6 +59,12 @@ assert.equal((await completed.clone().json()).step.verified, true, "La postcondi
 assert.equal((await completed.json()).step.taskCompleted, true, "El último paso verificado completa automáticamente su tarea.");
 assert.equal(database.prepare("SELECT state FROM agent_tasks WHERE id=?").get(taskId).state, "completed", "La tarea no queda ejecutándose tras terminar todos sus pasos.");
 assert.equal(JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(runId).verification_json).source, "server-state", "El contenido verificable conserva evidencia del servidor.");
+await database.prepare("INSERT INTO content_items(id,kind,content_type,title,slug,status,author_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(42, "post", "post", "En papelera", "en-papelera", "trash", 1, stamp, stamp);
+await database.prepare("INSERT INTO content_items(id,kind,content_type,title,slug,status,author_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(43, "post", "post", "Restaurado", "restaurado", "draft", 1, stamp, stamp);
+assert.equal((await finishVerified(await runningStep("cloudpress_update_content"), { id: 41 })).type, "d1_content_state", "Las actualizaciones de contenido se verifican en D1.");
+assert.equal((await finishVerified(await runningStep("cloudpress_trash_content"), { id: 42 })).type, "d1_content_state", "La Papelera se verifica en D1.");
+assert.equal((await finishVerified(await runningStep("cloudpress_restore_content"), { id: 43 })).type, "d1_content_state", "Las restauraciones se verifican en D1.");
+assert.equal((await finishVerified(await runningStep("cloudpress_set_user_active"), { id: 1, active: true })).type, "d1_user_state", "El estado activo de usuarios se verifica en D1.");
 const pluginTaskId = crypto.randomUUID(), pluginRunId = crypto.randomUUID();
 await database.prepare("INSERT INTO plugin_installations(plugin_id,manifest_json,status,installed_by,installed_at,updated_at) VALUES(?,?,?,?,?,?)").run("cloudpress-commerce", "{}", "enabled", 1, stamp, stamp);
 await database.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(pluginTaskId, crypto.randomUUID(), "reader-agent", 1, "Desactivar plugin", "[]", JSON.stringify({ classification: "public" }), "{}", "running", stamp, stamp);
