@@ -101,7 +101,7 @@ async function currentTaskScopedUser(request, env) {
   const user = await currentUser(request, env);
   if (!user || user.auth_method !== "agent_capability") return user;
   const step = await activeAgentStep(env, user, request.headers.get("x-cloudpress-task-id"), Number(request.headers.get("x-cloudpress-step-ordinal")), user.agent_tool_name, user.agent_tool_risk);
-  return step ? { ...user, agent_task_id: request.headers.get("x-cloudpress-task-id"), agent_step_id: step.id } : null;
+  return step ? { ...user, agent_task_id: request.headers.get("x-cloudpress-task-id"), agent_step_id: step.id, agent_run_id: step.run_id, agent_trace_id: step.trace_id } : null;
 }
 
 async function auditAgentCapabilityUse(request, env, user) {
@@ -110,6 +110,13 @@ async function auditAgentCapabilityUse(request, env, user) {
     const url = new URL(request.url);
     await env.DB.prepare("INSERT INTO agent_capability_events(capability_id,actor_id,method,path) VALUES(?,?,?,?)")
       .bind(user.agent_capability_id, user.id, request.method.toUpperCase(), url.pathname).run();
+    // A capability event alone cannot reconstruct what happened in a task.
+    // Add only the bounded routing facts to its correlated trace; never input,
+    // response data, bearer material or other potentially sensitive values.
+    if (user.agent_task_id && user.agent_run_id && user.agent_step_id && user.agent_trace_id) {
+      await env.DB.prepare("INSERT INTO agent_trace_events(trace_id,task_id,run_id,step_id,actor_id,event,details_json) VALUES(?,?,?,?,?,?,?)")
+        .bind(user.agent_trace_id, user.agent_task_id, user.agent_run_id, user.agent_step_id, user.id, "agent_tool_authorized", JSON.stringify({ method: request.method.toUpperCase(), path: url.pathname, tool: user.agent_tool_name, risk: user.agent_tool_risk })).run();
+    }
   } catch { /* Authorization must remain available if observability storage is temporarily unavailable. */ }
 }
 
@@ -126,6 +133,7 @@ async function requireBrowserAdmin(request, env, permission = "dashboard:access"
 
 async function requireAuthor(request, env) {
   const user = await currentTaskScopedUser(request, env);
+  await auditAgentCapabilityUse(request, env, user);
   return await hasCorePermission(env, user, "content:own") ? user : null;
 }
 

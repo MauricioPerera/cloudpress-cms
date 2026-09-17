@@ -30,6 +30,7 @@ assert.equal((await resumed.clone().json()).step.resumed, true, "Un agente puede
 assert.equal(database.prepare("SELECT steps_used FROM agent_runs WHERE id=?").get(runId).steps_used, 1, "La reanudación no consume una cuota adicional.");
 const businessHeaders = { ...headers, "x-cloudpress-task-id": taskId, "x-cloudpress-step-ordinal": "1" };
 assert.equal((await requireAuthor(new Request("https://cms.example/api/admin/entries", { method: "POST", headers: businessHeaders, body: JSON.stringify({ status: "draft" }) }), { DB }))?.id, 1, "La herramienta del agente exige un paso activo que coincida con su contrato.");
+assert.equal(database.prepare("SELECT COUNT(*) AS total FROM agent_trace_events WHERE task_id=? AND event='agent_tool_authorized'").get(taskId).total, 1, "El uso autorizado de herramienta queda en la traza correlacionada de la tarea.");
 assert.equal(await requireAuthor(new Request("https://cms.example/api/admin/entries", { method: "POST", headers, body: JSON.stringify({ status: "draft" }) }), { DB }), null, "Una capacidad no puede usar una herramienta fuera de un paso de tarea.");
 const unverified = await onRequestPost({ request: request({ action: "finish_step", taskId, ordinal: 1, outcome: { result: { id: 999 }, verification: { verified: true } } }), env: { DB } });
 assert.equal(unverified.status, 422, "Una postcondición de borrador inexistente no se acepta por declaración del agente.");
@@ -69,4 +70,4 @@ const sensitiveStep = database.prepare("SELECT result_json,verification_json FRO
 assert.deepEqual(JSON.parse(sensitiveStep.result_json), { deleted: "content", id: 41 }, "El resultado sensible persistido procede de la aprobación, no de la declaración del agente.");
 assert.equal(JSON.parse(sensitiveStep.verification_json).source, "server-approved-action", "La evidencia sensible identifica la ejecución A2F en el servidor.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "unified-business-tool-trace", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
