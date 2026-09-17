@@ -8,6 +8,17 @@ const now = () => new Date().toISOString();
 const validObject = (value, max = 12000) => value && typeof value === "object" && !Array.isArray(value) && JSON.stringify(value).length <= max;
 const validPlan = (value) => Array.isArray(value) && value.length <= 200 && value.every((item) => validObject(item, 4000));
 const parse = (row) => ({ ...row, ...(row.plan_json ? { plan: JSON.parse(row.plan_json) } : {}), ...(row.context_json ? { context: JSON.parse(row.context_json) } : {}), ...(row.expected_json ? { expected: JSON.parse(row.expected_json) } : {}), ...(row.data_policy_json ? { dataPolicy: JSON.parse(row.data_policy_json) } : {}) });
+const sensitiveTraceKey = /(?:pass(?:word)?|secret|token|authorization|cookie|pin|otp|recovery|credential|bearer|private.?key)/i;
+
+function safeTraceValue(value, key = "", depth = 0) {
+  if (sensitiveTraceKey.test(key)) return "[redacted]";
+  if (typeof value === "string") return /\bBearer\s+|-----BEGIN|\b(?:otp|pin)\s*[:=]/i.test(value) ? "[redacted]" : value.slice(0, 1000);
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+  if (depth >= 4) return "[truncated]";
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => safeTraceValue(item, "", depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).slice(0, 100).map(([name, item]) => [name, safeTraceValue(item, name, depth + 1)]));
+  return String(value).slice(0, 1000);
+}
 
 function profileInput(body) {
   const id = String(body?.id || "").trim().toLowerCase(), label = String(body?.label || "").trim(), purpose = String(body?.purpose || "").trim();
@@ -20,7 +31,9 @@ function profileInput(body) {
 }
 
 async function trace(env, { traceId, taskId = null, runId = null, stepId = null, actorId = null, event, details = {} }) {
-  await env.DB.prepare("INSERT INTO agent_trace_events(trace_id,task_id,run_id,step_id,actor_id,event,details_json) VALUES(?,?,?,?,?,?,?)").bind(traceId, taskId, runId, stepId, actorId, event, JSON.stringify(details)).run();
+  const serialized = JSON.stringify(safeTraceValue(details));
+  const bounded = serialized.length <= 12000 ? serialized : JSON.stringify({ truncated: true, reason: "trace_details_too_large" });
+  await env.DB.prepare("INSERT INTO agent_trace_events(trace_id,task_id,run_id,step_id,actor_id,event,details_json) VALUES(?,?,?,?,?,?,?)").bind(traceId, taskId, runId, stepId, actorId, event, bounded).run();
 }
 
 async function getProfile(env, id) {

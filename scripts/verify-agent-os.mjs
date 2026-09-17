@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { bytesToBase64 } from "../functions/_shared.js";
+import { trace } from "../functions/_agent-os.js";
 import { onRequestGet, onRequestPost } from "../functions/api/admin/agent-tasks.js";
 
 const database = new DatabaseSync(":memory:");
@@ -17,6 +18,11 @@ const token = "a".repeat(44), hash = bytesToBase64(new Uint8Array(await crypto.s
 await database.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,?)").run(1, hash, new Date(Date.now() + 60_000).toISOString());
 const env = { DB }, headers = { Cookie: `session=${token}`, "content-type": "application/json" };
 const request = (path, method = "GET", body) => new Request(`https://cms.example${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+await trace(env, { traceId: crypto.randomUUID(), event: "redaction_probe", details: { title: "seguro", accessToken: "no-debe-persistir", nested: { password: "no-debe-persistir" } } });
+const redactedTrace = JSON.parse(database.prepare("SELECT details_json FROM agent_trace_events WHERE event='redaction_probe'").get().details_json);
+assert.equal(redactedTrace.title, "seguro");
+assert.equal(redactedTrace.accessToken, "[redacted]", "Las trazas no persisten tokens de capacidad.");
+assert.equal(redactedTrace.nested.password, "[redacted]", "Las trazas no persisten secretos anidados.");
 
 const profile = await onRequestPost({ request: request("/api/admin/agent-tasks", "POST", { action: "create_profile", id: "editor-agent", label: "Agente editorial", purpose: "Preparar borradores verificables", maxActiveRuns: 1, maxStepsPerRun: 3, dataPolicy: { maximumClassification: "internal", allowSensitive: false }, tools: [{ name: "cloudpress_read_admin_state", risk: "read" }, { name: "cloudpress_create_draft", risk: "reversible" }] }), env });
 assert.equal(profile.status, 201, "Un administrador puede crear un perfil de agente limitado.");
@@ -67,4 +73,4 @@ assert.equal(loaded.trace.some((event) => event.event === "step_verified"), true
 const listed = await onRequestGet({ request: request("/api/admin/agent-tasks"), env });
 assert.equal((await listed.json()).profiles.find((item) => item.id === "editor-agent").tools.length, 2, "La consulta devuelve las herramientas permitidas por perfil.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "profile-discovery"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-contract", "data-policy-limit", "task-profile-limit", "ordered-step-execution", "postcondition-required", "sensitive-a2f-binding", "failed-step-trace", "retry-attempt", "persisted-run-steps", "unified-trace", "trace-secret-redaction", "profile-discovery"] }));
