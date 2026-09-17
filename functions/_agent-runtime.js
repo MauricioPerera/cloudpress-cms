@@ -160,12 +160,19 @@ export async function routeAgentModel(env, agent, jobId, leaseId, request) {
   const estimatedInputTokens = Number(request?.estimatedInputTokens), estimatedOutputTokens = Number(request?.estimatedOutputTokens), preferredModelId = request?.modelId ? String(request.modelId) : null;
   if (![estimatedInputTokens, estimatedOutputTokens].every((value) => Number.isInteger(value) && value >= 0 && value <= 10000000)) throw new Error("Estimación de tokens inválida.");
   const candidates = await env.DB.prepare("SELECT id,provider_id,model_id,label,data_residency,max_input_tokens,max_output_tokens,input_cost_microunits,output_cost_microunits FROM agent_model_catalog WHERE owner_id=? AND status='enabled' ORDER BY input_cost_microunits+output_cost_microunits,model_id").bind(agent.id).all();
+  // Profiles created before model residency was added must retain the safe default
+  // (any), rather than becoming unable to route every catalogued model.
+  const residency = String(profile.dataPolicy?.modelResidency || "any");
   const budget = Number(profile.dataPolicy?.governance?.budget?.maxModelCostMicrounits ?? 0);
-  const model = candidates.results.find((item) => (!preferredModelId || item.model_id === preferredModelId) && (profile.dataPolicy?.modelResidency === "any" || item.data_residency === profile.dataPolicy?.modelResidency) && estimatedInputTokens <= item.max_input_tokens && estimatedOutputTokens <= item.max_output_tokens && estimatedInputTokens * item.input_cost_microunits + estimatedOutputTokens * item.output_cost_microunits <= budget);
+  const spent = Number((await env.DB.prepare("SELECT COALESCE(SUM(cost_microunits),0) AS total FROM agent_model_usage WHERE run_id=?").bind(job.run_id).first("total")) || 0);
+  const model = candidates.results.find((item) => {
+    const estimatedCost = estimatedInputTokens * item.input_cost_microunits + estimatedOutputTokens * item.output_cost_microunits;
+    return (!preferredModelId || item.model_id === preferredModelId) && (residency === "any" || item.data_residency === residency) && estimatedInputTokens <= item.max_input_tokens && estimatedOutputTokens <= item.max_output_tokens && spent + estimatedCost <= budget;
+  });
   if (!model) throw new Error("No hay un modelo habilitado que cumpla residencia, tokens y presupuesto del perfil.");
   const estimatedCostMicrounits = estimatedInputTokens * model.input_cost_microunits + estimatedOutputTokens * model.output_cost_microunits;
-  await runtimeTrace(env, job, "model_routed", { modelCatalogId: model.id, provider: model.provider_id, model: model.model_id, dataResidency: model.data_residency, estimatedInputTokens, estimatedOutputTokens, estimatedCostMicrounits, budgetMicrounits: budget });
-  return { id: model.id, providerId: model.provider_id, modelId: model.model_id, label: model.label, dataResidency: model.data_residency, estimatedCostMicrounits, budgetMicrounits: budget };
+  await runtimeTrace(env, job, "model_routed", { modelCatalogId: model.id, provider: model.provider_id, model: model.model_id, dataResidency: model.data_residency, estimatedInputTokens, estimatedOutputTokens, estimatedCostMicrounits, spentMicrounits: spent, budgetMicrounits: budget });
+  return { id: model.id, providerId: model.provider_id, modelId: model.model_id, label: model.label, dataResidency: model.data_residency, estimatedCostMicrounits, spentMicrounits: spent, budgetMicrounits: budget };
 }
 
 function modelText(response) {
