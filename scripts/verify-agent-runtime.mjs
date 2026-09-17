@@ -13,7 +13,7 @@ const wrap = (sql, values = []) => ({
   async run() { const result = database.prepare(sql).run(...values); return { meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid || 0) } }; },
 });
 const DB = { prepare(sql) { return { bind(...values) { return wrap(sql, values); }, ...wrap(sql) }; }, async batch(statements) { return Promise.all(statements.map((statement) => statement.run())); } };
-const env = { DB, AI: { async run(model, payload) { assert.equal(model, "@cf/test/runtime"); assert.equal(payload.messages[0].content, "resume el estado"); return { response: "estado resumido", usage: { input_tokens: 4, output_tokens: 3 } }; } } }, stamp = new Date().toISOString();
+const env = { DB, AI: { async run(model, payload) { assert.equal(model, "@cf/test/runtime"); assert.equal(payload.messages[0].content, "resume el estado"); assert.equal(payload.max_tokens, 3, "El catálogo transmite su límite de salida al binding."); return { response: "estado resumido", usage: { input_tokens: 4, output_tokens: 3 } }; } } }, stamp = new Date().toISOString();
 const taskId = "00000000-0000-0000-0000-000000000001", runId = "00000000-0000-0000-0000-000000000002", jobId = "00000000-0000-0000-0000-000000000003";
 database.prepare("INSERT INTO users(id,username,password_hash,password_salt,role) VALUES(?,?,?,?,?)").run(1, "admin", "hash", "salt", "admin");
 database.prepare("INSERT INTO agent_profiles(id,owner_id,label,purpose,data_policy_json) VALUES(?,?,?,?,?)").run("runtime-agent", 1, "Runtime", "Ejecutar", JSON.stringify({ maximumClassification: "internal", allowSensitive: false, governance: { budget: { maxModelCostMicrounits: 100 } } }));
@@ -42,7 +42,7 @@ const routed = await routeAgentModel(env, agent, jobId, assignment.job.leaseId, 
 assert.equal(routed.estimatedCostMicrounits, 50, "El router respeta los precios del catálogo y el presupuesto del perfil.");
 await assert.rejects(() => upsertAgentModel(env, agent, { providerId: "cloudflare-workers-ai", modelId: "@cf/test/wnam", label: "Workers AI WNAM", dataResidency: "wnam", maxInputTokens: 100, maxOutputTokens: 100, inputCostMicrounits: 1, outputCostMicrounits: 1, status: "enabled" }), /no permite fijar residencia regional/, "Workers AI no puede catalogarse con una residencia regional que Cloudflare no garantiza.");
 await upsertAgentModel(env, agent, { providerId: "cloudflare-workers-ai", modelId: "@cf/test/runtime", label: "Workers AI", dataResidency: "cloudflare-managed", maxInputTokens: 100, maxOutputTokens: 100, inputCostMicrounits: 1, outputCostMicrounits: 1, status: "enabled" });
-const inference = await invokeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "@cf/test/runtime", estimatedInputTokens: 4, estimatedOutputTokens: 3, prompt: "resume el estado" });
+const inference = await invokeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "@cf/test/runtime", estimatedInputTokens: 16, estimatedOutputTokens: 3, prompt: "resume el estado" });
 assert.equal(inference.output, "estado resumido", "El adaptador Workers AI invoca únicamente el modelo enrutado.");
 assert.equal(inference.usage.costMicrounits, 7, "El coste de inferencia se calcula con el catálogo y tokens devueltos por el binding.");
 await assert.rejects(() => routeAgentModel(env, agent, jobId, assignment.job.leaseId, { modelId: "browser-agent", estimatedInputTokens: 20, estimatedOutputTokens: 20 }), /presupuesto/, "El router reserva el coste ya consumido por la ejecución antes de permitir otra inferencia.");

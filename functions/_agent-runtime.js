@@ -201,13 +201,20 @@ function modelText(response) {
 export async function invokeAgentModel(env, agent, jobId, leaseId, request) {
   const prompt = String(request?.prompt || "").trim();
   if (!prompt || prompt.length > 16000) throw new Error("Prompt de inferencia inválido.");
+  // Cloudflare's text-generation API accepts max_tokens.  The model catalogue
+  // is a security boundary, so pass the routed cap to the provider rather than
+  // merely using it for accounting after an unbounded response is generated.
+  // UTF-8 bytes are a deliberately conservative upper bound for token count;
+  // callers must reserve at least that much input budget before sending data.
+  const conservativeInputTokens = new TextEncoder().encode(prompt).length;
+  if (!Number.isInteger(Number(request?.estimatedInputTokens)) || Number(request.estimatedInputTokens) < conservativeInputTokens) throw new Error("La estimación de entrada debe cubrir el prompt completo.");
   const job = await leasedJob(env, agent, jobId, leaseId);
   const routed = await routeAgentModel(env, agent, jobId, leaseId, request);
   if (routed.providerId !== "cloudflare-workers-ai") throw new Error("El proveedor external-webmcp se ejecuta fuera de CloudPress; no se puede invocar desde el Worker.");
   if (!env.AI?.run) throw new Error("Workers AI no está configurado para Pages. Añade el binding AI en el panel de Cloudflare antes de habilitar este modelo.");
   let response;
   try {
-    response = await env.AI.run(routed.modelId, { messages: [{ role: "user", content: prompt }] });
+    response = await env.AI.run(routed.modelId, { messages: [{ role: "user", content: prompt }], max_tokens: Number(request.estimatedOutputTokens) });
   } catch (error) {
     await runtimeTrace(env, job, "model_invocation_failed", { provider: routed.providerId, model: routed.modelId, reason: String(error?.message || "provider_error").slice(0, 500) });
     throw new Error("Workers AI no pudo completar la inferencia.");
