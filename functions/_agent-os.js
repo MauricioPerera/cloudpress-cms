@@ -169,6 +169,23 @@ async function failStep(env, actor, taskId, ordinal, errorText) {
   return { id: step.id, state: "failed" };
 }
 
+// Sensitive operations are executed by the approval endpoint, never by this
+// recorder. Persist only the canonical outcome of that accepted operation.
+function approvedSensitiveResult(payload) {
+  if (payload.operation === "purge_content") return { deleted: "content", id: payload.contentId };
+  if (payload.operation === "delete_user") return { deleted: "user", id: payload.userId };
+  if (payload.operation === "delete_media") return { deleted: "media", key: payload.key };
+  if (payload.operation === "uninstall_plugin") return { deleted: "plugin", id: payload.pluginId, policy: payload.policy || "preserve-content-purge-plugin-storage" };
+  if (payload.operation === "delete_metadata") return { deleted: "metadata", scope: payload.scope, entityId: payload.entityId, key: payload.key };
+  if (payload.operation === "delete_core_term") return { deleted: "core_term", id: payload.termId };
+  if (payload.operation === "delete_plugin_term") return { deleted: "plugin_term", id: payload.termId, pluginId: payload.pluginId, taxonomyId: payload.taxonomyId };
+  return null;
+}
+
+function sameApprovedResult(actual, expected) {
+  return validObject(actual) && Object.entries(expected).every(([key, value]) => JSON.stringify(actual[key]) === JSON.stringify(value));
+}
+
 async function finishSensitiveStep(env, actor, taskId, ordinal, approvalRequestId, outcome) {
   if (!Number.isInteger(ordinal) || ordinal < 1 || !/^[A-Za-z0-9-]{36}$/.test(String(approvalRequestId || "")) || !validObject(outcome?.result ?? {}) || !validObject(outcome?.verification ?? {})) throw new Error("Confirmación sensible inválida.");
   if (outcome.verification.verified !== true) throw new Error("El paso requiere una postcondición verificada.");
@@ -180,16 +197,19 @@ async function finishSensitiveStep(env, actor, taskId, ordinal, approvalRequestI
   const preconditions = JSON.parse(step.preconditions_json);
   let payload; try { payload = JSON.parse(approval.payload_json); } catch { throw new Error("La aprobación A2F no tiene un payload válido."); }
   if (payload.operation !== preconditions.approvalOperation) throw new Error("La aprobación A2F corresponde a otra operación.");
+  const approvedResult = approvedSensitiveResult(payload);
+  if (!approvedResult || !sameApprovedResult(outcome.result, approvedResult)) throw new Error("El resultado no coincide con la operación A2F ejecutada.");
   const alreadyLinked = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE approval_request_id=? LIMIT 1").bind(approvalRequestId).first();
   if (alreadyLinked) throw new Error("Esta aprobación A2F ya está vinculada a otro paso.");
   const stamp = now();
   const claimed = await env.DB.prepare("UPDATE agent_runs SET steps_used=steps_used+1,state='running',updated_at=? WHERE id=? AND state='waiting_approval' AND steps_used<step_limit").bind(stamp, run.id).run();
   if (!claimed.meta?.changes) throw new Error("La ejecución alcanzó su límite de pasos.");
+  const verification = { ...outcome.verification, verified: true, source: "server-approved-action", evidence: { type: "approval_execution", approvalRequestId, operation: payload.operation } };
   await env.DB.batch([
-    env.DB.prepare("UPDATE agent_steps SET state='completed',approval_request_id=?,result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='waiting_approval'").bind(approvalRequestId, JSON.stringify(outcome.result), JSON.stringify(outcome.verification), stamp, stamp, step.id),
+    env.DB.prepare("UPDATE agent_steps SET state='completed',approval_request_id=?,result_json=?,verification_json=?,completed_at=?,updated_at=? WHERE id=? AND state='waiting_approval'").bind(approvalRequestId, JSON.stringify(approvedResult), JSON.stringify(verification), stamp, stamp, step.id),
     env.DB.prepare("UPDATE agent_tasks SET state='running',updated_at=? WHERE id=? AND state='waiting_approval'").bind(stamp, taskId),
   ]);
-  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "sensitive_step_verified", details: { ordinal, tool: step.tool_name, approvalRequestId, operation: payload.operation, verification: outcome.verification } });
+  await trace(env, { traceId: task.trace_id, taskId, runId: run.id, stepId: step.id, actorId: actor.id, event: "sensitive_step_verified", details: { ordinal, tool: step.tool_name, approvalRequestId, operation: payload.operation, verification } });
   return { id: step.id, state: "completed", verified: true, approvalRequestId };
 }
 

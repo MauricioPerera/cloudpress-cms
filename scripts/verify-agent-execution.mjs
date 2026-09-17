@@ -40,7 +40,12 @@ await database.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk
 const waiting = await onRequestPost({ request: request({ action: "start_step", taskId: sensitiveTaskId, ordinal: 1 }), env: { DB } });
 assert.equal(waiting.status, 200, "El canal de agente pausa el paso sensible antes de ejecutarlo.");
 await database.prepare("INSERT INTO approval_requests(id,actor_id,operation,payload_json,summary_json,token_hash,expires_at,state,prepared_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(approvalId, 1, "purge_content", JSON.stringify({ operation: "purge_content", contentId: 41 }), "{}", "hash", stamp, "accepted", stamp, stamp);
+const sensitiveMismatch = await onRequestPost({ request: request({ action: "finish_sensitive_step", taskId: sensitiveTaskId, ordinal: 1, approvalRequestId: approvalId, outcome: { result: { deleted: "content", id: 999 }, verification: { verified: true, check: "resultado falso" } } }), env: { DB } });
+assert.equal(sensitiveMismatch.status, 422, "Un resultado sensible que contradice la aprobación aceptada se rechaza.");
 const sensitiveDone = await onRequestPost({ request: request({ action: "finish_sensitive_step", taskId: sensitiveTaskId, ordinal: 1, approvalRequestId: approvalId, outcome: { result: { deleted: "content", id: 41 }, verification: { verified: true, check: "A2F aceptado" } } }), env: { DB } });
 assert.equal(sensitiveDone.status, 200, "El agente sólo puede concluir su paso sensible con A2F aceptado.");
+const sensitiveStep = database.prepare("SELECT result_json,verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(sensitiveRunId);
+assert.deepEqual(JSON.parse(sensitiveStep.result_json), { deleted: "content", id: 41 }, "El resultado sensible persistido procede de la aprobación, no de la declaración del agente.");
+assert.equal(JSON.parse(sensitiveStep.verification_json).source, "server-approved-action", "La evidencia sensible identifica la ejecución A2F en el servidor.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "server-postcondition-verification", "sensitive-a2f-execution-binding", "persisted-agent-step", "foreign-task-denied"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
