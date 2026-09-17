@@ -37,6 +37,19 @@ await database.prepare("INSERT INTO content_items(id,kind,content_type,title,slu
 const completed = await onRequestPost({ request: request({ action: "finish_step", taskId, ordinal: 1, outcome: { result: { id: 41 }, verification: { verified: true, check: "borrador creado" } } }), env: { DB } });
 assert.equal(completed.status, 200, "La credencial puede persistir un resultado verificado.");
 assert.equal((await completed.clone().json()).step.verified, true, "La postcondición se acepta sólo tras comprobar el estado persistido.");
+assert.equal(JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(runId).verification_json).source, "server-state", "El contenido verificable conserva evidencia del servidor.");
+const pluginTaskId = crypto.randomUUID(), pluginRunId = crypto.randomUUID();
+await database.prepare("INSERT INTO plugin_installations(plugin_id,manifest_json,status,installed_by,installed_at,updated_at) VALUES(?,?,?,?,?,?)").run("cloudpress-commerce", "{}", "enabled", 1, stamp, stamp);
+await database.prepare("INSERT INTO agent_tasks(id,trace_id,profile_id,actor_id,objective,plan_json,context_json,expected_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(pluginTaskId, crypto.randomUUID(), "reader-agent", 1, "Desactivar plugin", "[]", JSON.stringify({ classification: "public" }), "{}", "running", stamp, stamp);
+await database.prepare("INSERT INTO agent_runs(id,task_id,attempt,state,step_limit,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(pluginRunId, pluginTaskId, 1, "running", 3, stamp, stamp);
+await database.prepare("INSERT INTO agent_steps(id,run_id,ordinal,tool_name,risk,state,input_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), pluginRunId, 1, "cloudpress_set_plugin_state", "reversible", "planned", JSON.stringify({ id: "cloudpress-commerce", status: "disabled" }), stamp, stamp);
+assert.equal((await onRequestPost({ request: request({ action: "start_step", taskId: pluginTaskId, ordinal: 1 }), env: { DB } })).status, 200, "El paso de plugin puede iniciarse.");
+const pluginMismatch = await onRequestPost({ request: request({ action: "finish_step", taskId: pluginTaskId, ordinal: 1, outcome: { result: { id: "cloudpress-commerce", status: "disabled" }, verification: { verified: true, check: "estado declarado" } } }), env: { DB } });
+assert.equal(pluginMismatch.status, 422, "Un estado de plugin sólo declarado no se acepta.");
+await database.prepare("UPDATE plugin_installations SET status='disabled' WHERE plugin_id='cloudpress-commerce'").run();
+const pluginCompleted = await onRequestPost({ request: request({ action: "finish_step", taskId: pluginTaskId, ordinal: 1, outcome: { result: { id: "cloudpress-commerce", status: "disabled" }, verification: { verified: true, check: "estado D1 confirmado" } } }), env: { DB } });
+assert.equal(pluginCompleted.status, 200, "Un estado de plugin comprobado en D1 se acepta.");
+assert.equal(JSON.parse(database.prepare("SELECT verification_json FROM agent_steps WHERE run_id=? AND ordinal=1").get(pluginRunId).verification_json).evidence.type, "d1_plugin_state", "La evidencia de plugin procede del estado persistido.");
 const foreign = await onRequestPost({ request: request({ action: "start_step", taskId: crypto.randomUUID(), ordinal: 1 }), env: { DB } });
 assert.equal(foreign.status, 422, "La credencial no puede operar tareas de otro perfil o actor.");
 const sensitiveTaskId = crypto.randomUUID(), sensitiveRunId = crypto.randomUUID(), approvalId = crypto.randomUUID();
@@ -56,4 +69,4 @@ const sensitiveStep = database.prepare("SELECT result_json,verification_json FRO
 assert.deepEqual(JSON.parse(sensitiveStep.result_json), { deleted: "content", id: 41 }, "El resultado sensible persistido procede de la aprobación, no de la declaración del agente.");
 assert.equal(JSON.parse(sensitiveStep.verification_json).source, "server-approved-action", "La evidencia sensible identifica la ejecución A2F en el servidor.");
 database.close();
-console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "sensitive-task-scoped-approval", "server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
+console.log(JSON.stringify({ ok: true, checks: ["profile-bound-execution", "task-step-resume-without-extra-quota", "task-scoped-business-tool", "sensitive-task-scoped-approval", "server-postcondition-verification", "plugin-server-postcondition-verification", "sensitive-a2f-execution-binding", "sensitive-server-outcome-verification", "persisted-agent-step", "foreign-task-denied"] }));
