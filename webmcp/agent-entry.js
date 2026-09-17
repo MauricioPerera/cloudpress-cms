@@ -1,12 +1,12 @@
 import { registerCloudPressAdminTools } from "./fastwebmcp-entry.js";
 import { createCloudPressAgentApi, createCloudPressAgentLsfaBroker } from "./cloudpress-lsfa-broker.js";
-import { useAgentApi } from "./fastwebmcp-tools.js";
+import { currentAgentExecution, useAgentApi } from "./fastwebmcp-tools.js";
 
 // This page deliberately has no CloudPress cookie requirement. Every permitted
 // API call travels through the local LSFA companion, which alone holds the
 // revocable capability provisioned by the logged-in administrator.
-useAgentApi(createCloudPressAgentApi());
-const controller = registerCloudPressAdminTools({ broker: createCloudPressAgentLsfaBroker() });
+useAgentApi(createCloudPressAgentApi(currentAgentExecution));
+const controller = registerCloudPressAdminTools({ broker: createCloudPressAgentLsfaBroker(currentAgentExecution) });
 addEventListener("pagehide", () => controller.abort(), { once: true });
 
 const status = document.querySelector("#cloudpress-agent-status");

@@ -1,6 +1,7 @@
 const encoder = new TextEncoder();
 import { hasCorePermission } from "./_roles.js";
 import { agentToolAllows } from "./_agent-tool-contracts.js";
+import { activeAgentStep } from "./_agent-os.js";
 // Cloudflare Workers rejects PBKDF2 counts above 100,000. Keeping this
 // deployable prevents an uncaught NotSupportedError during login.
 const PBKDF2_ITERATIONS = 100000;
@@ -93,7 +94,14 @@ async function currentUser(request, env) {
   if (!user) return null;
   const grants = await env.DB.prepare("SELECT tool_name,risk FROM agent_profile_tools JOIN agent_profiles ON agent_profiles.id=agent_profile_tools.profile_id WHERE agent_profile_tools.profile_id=? AND agent_profiles.owner_id=? AND agent_profiles.status='active'").bind(user.agent_profile_id, user.id).all();
   const contract = await agentToolAllows(request, grants.results.map((grant) => ({ name: grant.tool_name, risk: grant.risk })));
-  return contract ? { ...user, agent_tool_name: contract.name, auth_method: "agent_capability" } : null;
+  return contract ? { ...user, agent_tool_name: contract.name, agent_tool_risk: contract.risk, auth_method: "agent_capability" } : null;
+}
+
+async function currentTaskScopedUser(request, env) {
+  const user = await currentUser(request, env);
+  if (!user || user.auth_method !== "agent_capability") return user;
+  const step = await activeAgentStep(env, user, request.headers.get("x-cloudpress-task-id"), Number(request.headers.get("x-cloudpress-step-ordinal")), user.agent_tool_name, user.agent_tool_risk);
+  return step ? { ...user, agent_task_id: request.headers.get("x-cloudpress-task-id"), agent_step_id: step.id } : null;
 }
 
 async function auditAgentCapabilityUse(request, env, user) {
@@ -106,7 +114,7 @@ async function auditAgentCapabilityUse(request, env, user) {
 }
 
 async function requireAdmin(request, env, permission = "dashboard:access") {
-  const user = await currentUser(request, env);
+  const user = await currentTaskScopedUser(request, env);
   await auditAgentCapabilityUse(request, env, user);
   return await hasCorePermission(env, user, permission) ? user : null;
 }
@@ -117,12 +125,12 @@ async function requireBrowserAdmin(request, env, permission = "dashboard:access"
 }
 
 async function requireAuthor(request, env) {
-  const user = await currentUser(request, env);
+  const user = await currentTaskScopedUser(request, env);
   return await hasCorePermission(env, user, "content:own") ? user : null;
 }
 
 async function requireRoleManager(request, env) {
-  const user = await currentUser(request, env);
+  const user = await currentTaskScopedUser(request, env);
   await auditAgentCapabilityUse(request, env, user);
   return await hasCorePermission(env, user, "roles:manage") ? user : null;
 }

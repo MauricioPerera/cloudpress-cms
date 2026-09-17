@@ -98,6 +98,16 @@ async function currentTaskRun(env, taskId) {
   return { task, run };
 }
 
+// A capability may invoke a business tool only while it owns the exact step
+// declared for that tool.  This is deliberately separate from authentication:
+// a valid capability is not a standing delegation to act outside a task.
+async function activeAgentStep(env, agent, taskId, ordinal, toolName, risk) {
+  if (!/^[A-Za-z0-9-]{36}$/.test(String(taskId || "")) || !Number.isInteger(ordinal) || ordinal < 1 || ordinal > 200 || !TOOL_NAME.test(String(toolName || "")) || !RISK.has(risk)) return null;
+  const expectedState = risk === "sensitive" ? "waiting_approval" : "running";
+  return env.DB.prepare("SELECT agent_steps.id,agent_runs.id AS run_id,agent_tasks.trace_id FROM agent_tasks JOIN agent_runs ON agent_runs.task_id=agent_tasks.id JOIN agent_steps ON agent_steps.run_id=agent_runs.id WHERE agent_tasks.id=? AND agent_tasks.actor_id=? AND agent_tasks.profile_id=? AND agent_tasks.state=? AND agent_runs.state=? AND agent_runs.attempt=(SELECT MAX(attempt) FROM agent_runs WHERE task_id=agent_tasks.id) AND agent_steps.ordinal=? AND agent_steps.tool_name=? AND agent_steps.risk=? AND agent_steps.state=?")
+    .bind(taskId, agent.id, agent.agent_profile_id, expectedState, expectedState, ordinal, toolName, risk, expectedState).first();
+}
+
 async function transitionTask(env, actor, taskId, nextState, reason = "") {
   if (!TASK_STATES.has(nextState)) throw new Error("Estado de tarea inválido.");
   const { task, run } = await currentTaskRun(env, taskId);
@@ -120,7 +130,12 @@ async function startStep(env, actor, taskId, ordinal) {
   const { task, run } = await currentTaskRun(env, taskId);
   if (task.state !== "running" || run.state !== "running") throw new Error("La tarea no está en ejecución.");
   const step = await env.DB.prepare("SELECT id,tool_name,risk,state FROM agent_steps WHERE run_id=? AND ordinal=?").bind(run.id, ordinal).first();
-  if (!step || step.state !== "planned") throw new Error("El paso no está disponible.");
+  if (!step) throw new Error("El paso no está disponible.");
+  // Re-attaching a companion after a browser reload must not consume another
+  // quota unit or leave an already-running step permanently inaccessible.
+  if (step.state === "running" && task.state === "running" && run.state === "running") return { id: step.id, state: "running", tool: step.tool_name, resumed: true };
+  if (step.state === "waiting_approval" && step.risk === "sensitive" && task.state === "waiting_approval" && run.state === "waiting_approval") return { id: step.id, state: "waiting_approval", requiresApproval: true, resumed: true };
+  if (step.state !== "planned") throw new Error("El paso no está disponible.");
   const previous = await env.DB.prepare("SELECT 1 FROM agent_steps WHERE run_id=? AND ordinal<? AND state NOT IN ('completed','skipped') LIMIT 1").bind(run.id, ordinal).first();
   if (previous) throw new Error("Los pasos anteriores deben verificarse primero.");
   if (step.risk === "sensitive") {
@@ -230,4 +245,4 @@ async function retryTask(env, actor, taskId) {
   return { id: taskId, runId, attempt: run.attempt + 1, state: "queued" };
 }
 
-export { createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, retryTask, startStep, taskDetail, trace, transitionTask };
+export { activeAgentStep, createProfile, createTask, failStep, finishSensitiveStep, finishStep, getProfile, listProfiles, profileInput, retryTask, startStep, taskDetail, trace, transitionTask };

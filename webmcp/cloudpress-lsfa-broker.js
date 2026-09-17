@@ -8,13 +8,13 @@ const channelHeaders = () => {
   return { "content-type": "application/json", "x-lsfa-channel-token": token };
 };
 
-export function createCloudPressAgentApi() {
-  return async (path, method = "GET", body) => {
+export function createCloudPressAgentApi(getExecution = () => null) {
+  return async (path, method = "GET", body, execution = getExecution()) => {
     let response;
     try {
       response = await fetch(`${LOOPBACK_ORIGIN}/v1/cloudpress/agent-api`, {
         method: "POST", mode: "cors", credentials: "omit", headers: channelHeaders(),
-        body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin: location.origin, request: { path, method, body } }),
+        body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin: location.origin, request: { path, method, body, execution } }),
       });
     } catch {
       throw new Error("El navegador no permitió conectar con el companion LSFA local.");
@@ -26,10 +26,10 @@ export function createCloudPressAgentApi() {
   };
 }
 
-export function createCloudPressAgentLsfaBroker() {
+export function createCloudPressAgentLsfaBroker(getExecution = () => null) {
   return { async request(request, { signal, origin }) {
     try {
-      const response = await fetch(`${LOOPBACK_ORIGIN}/v1/cloudpress/agent-approvals`, { method: "POST", mode: "cors", credentials: "omit", signal, headers: channelHeaders(), body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin, input: request.agentInput, intent: request.intent }) });
+        const response = await fetch(`${LOOPBACK_ORIGIN}/v1/cloudpress/agent-approvals`, { method: "POST", mode: "cors", credentials: "omit", signal, headers: channelHeaders(), body: JSON.stringify({ protocol: "lsfa", version: "0.2", origin, input: request.agentInput, intent: request.intent, execution: getExecution() }) });
       if (!response.ok) return failed("broker_rejected_request");
       return await response.json();
     } catch { return failed("broker_unavailable"); }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createWebMcpMock, withMockDocument } from "fastwebmcp";
 import { registerCloudPressAdminTools } from "../webmcp/fastwebmcp-entry.js";
 
@@ -51,4 +52,8 @@ try {
 
 assert.equal(calls.some((call) => call.path === "/api/admin/entries" && call.method === "POST"), true);
 assert.equal(calls.some((call) => call.path === "/api/admin/media" && call.method === "POST"), true);
-console.log(JSON.stringify({ ok: true, checks: ["fastwebmcp-registration", "reversible-tool-execution", "media-upload-validation", "lsfa-broker-fail-closed", "pagehide-unregister"] }));
+const toolSource = await readFile("webmcp/fastwebmcp-tools.js", "utf8");
+const brokerSource = await readFile("webmcp/cloudpress-lsfa-broker.js", "utf8");
+assert.match(toolSource, /currentAgentExecution/, "Las herramientas conservan el contexto del paso activo.");
+assert.match(brokerSource, /execution/, "El companion recibe el contexto de tarea validable.");
+console.log(JSON.stringify({ ok: true, checks: ["fastwebmcp-registration", "reversible-tool-execution", "task-execution-context-forwarding", "media-upload-validation", "lsfa-broker-fail-closed", "pagehide-unregister"] }));

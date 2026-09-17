@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 let agentApi = null;
+let agentExecution = null;
 export function useAgentApi(request) { agentApi = request; }
+export function currentAgentExecution() { return agentExecution ? { ...agentExecution } : null; }
 const api = async (path, method = "GET", body) => {
-  if (agentApi) return agentApi(path, method, body);
+  if (agentApi) return agentApi(path, method, body, agentExecution);
   const response = await fetch(path, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -75,6 +77,8 @@ export const reversibleTools = [
       if (input.action === "fail_step" && !input.error) throw new Error("Indica el motivo del fallo.");
       if (input.action === "finish_sensitive_step" && !input.approvalRequestId) throw new Error("Indica la aprobación A2F aceptada.");
       const data = await api("/api/admin/agent-execution", "POST", input);
+      if (input.action === "start_step" && ["running", "waiting_approval"].includes(data.step.state)) agentExecution = { taskId: input.taskId, ordinal: input.ordinal };
+      if (["finish_step", "finish_sensitive_step", "fail_step"].includes(input.action) && agentExecution?.taskId === input.taskId && agentExecution.ordinal === input.ordinal) agentExecution = null;
       visible(`Paso ${input.ordinal} registrado: ${data.step.state}.`);
       return data.step;
     },
