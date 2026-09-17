@@ -1,15 +1,20 @@
 (() => {
-  const view = "agent-operations";
-  if (typeof map !== "object" || map[view]) return;
-  map[view] = ["/agent-operations.html", null, "Supervisa y controla tareas de agentes."];
-  const add = () => {
-    if (document.querySelector(`[data-view="${view}"]`)) return;
+  if (typeof map !== "object" || map["agent-overview"]) return;
+  const views = [
+    ["agent-overview", "◉ Operaciones de agentes", "overview", false, "Resumen de ejecución, uso y coste de los agentes."],
+    ["agent-tasks", "Tareas", "tasks", true, "Crea, ejecuta y revisa la evidencia de las tareas."],
+    ["agent-profiles", "Perfiles", "profiles", true, "Define límites, herramientas y gobierno de cada agente."],
+    ["agent-models", "Modelos", "models", true, "Configura los modelos autorizados y sus límites de coste."]
+  ];
+  const group = document.querySelector("aside .group:last-child");
+  if (!group) return;
+  for (const [view, label, tab, sub, description] of views) {
+    map[view] = [`/agent-operations.html?tab=${tab}`, null, description];
     const button = document.createElement("button");
-    button.className = "nav";
+    button.className = `nav${sub ? " sub" : ""}`;
     button.dataset.view = view;
-    button.textContent = "◉ Operaciones de agentes";
+    button.textContent = label;
     button.onclick = () => open(view);
-    document.querySelector("aside .group:last-child")?.append(button);
-  };
-  add();
+    group.append(button);
+  }
 })();
