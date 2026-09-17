@@ -27,8 +27,12 @@ export async function qualityGate(args = process.argv.slice(2)) {
   if (protectedChanges.length) throw new Error(`El perímetro de pruebas aprobado fue modificado: ${protectedChanges.join(", ")}.`);
   const checks = [];
   for (const check of policy.requiredChecks) {
-    const executable = process.platform === "win32" ? `${check.command[0]}.cmd` : check.command[0];
-    const result = spawnSync(executable, check.command.slice(1), { stdio: "inherit" });
+    // Windows does not execute .cmd files directly with spawnSync. The command
+    // originates from the checked-in, protected policy and is invoked through
+    // cmd.exe explicitly rather than Node's unsafe `shell: true` shortcut.
+    const result = process.platform === "win32"
+      ? spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", check.command.join(" ")], { stdio: "inherit" })
+      : spawnSync(check.command[0], check.command.slice(1), { stdio: "inherit" });
     checks.push({ category: check.category, command: check.command, status: result.status });
     if (result.status !== 0) throw new Error(`Falló la prueba obligatoria de ${check.category}.`);
   }
